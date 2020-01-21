@@ -63,7 +63,7 @@ public:
                                                   symbolTable,structMap,
                                                   total, miss);
 
-    for(unsigned long k = 0; k < m->members->dim; k++) {
+    for(unsigned long k = 0; k < m->members->length; k++) {
       total++;
       Dsymbol *dsym = (*m->members)[k];
       assert(dsym);
@@ -186,7 +186,7 @@ private:
     //Supposing that the type is integer
     unsigned long size = 0;
     if(Fd->parameters)
-      size = Fd->parameters->dim;
+      size = Fd->parameters->length;
 
     // Arguments type is uniformly a generic array.
     llvm::SmallVector<mlir::Type, 4> arg_types(size, get_MLIRtype(Fd->parameters));
@@ -228,7 +228,7 @@ private:
     //Setting arguments of a given function
     unsigned long size = 0;
     if(Fd->parameters)
-      size = Fd->parameters->dim;
+      size = Fd->parameters->length;
     llvm::SmallVector<VarDeclarations*, 4> args(size, Fd->parameters);
 
     //args.push_back(mlirGen())
@@ -299,7 +299,7 @@ private:
             MLIRDeclaration *declaration = new MLIRDeclaration(irs, nullptr,
                     context, builder, symbolTable, structMap, total, miss);
             mlir::Value value = declaration->mlirGen(vd);
-            return value->getType();
+            return value.getType();
         }
       }
       miss++;

@@ -107,7 +107,7 @@ static mlir::LogicalResult verifyConstantForType(mlir::Type type,
 
 
 static mlir::LogicalResult verify(StructConstantOp op) {
-  return verifyConstantForType(op.getResult()->getType(), op.value(), op);
+  return verifyConstantForType(op.getResult().getType(), op.value(), op);
 }
 
 
@@ -117,7 +117,7 @@ static mlir::LogicalResult verify(StructConstantOp op) {
 void StructAccessOp::build(mlir::Builder *b, mlir::OperationState &state,
                            mlir::Value input, size_t index) {
   // Extract the result type from the input type.
-  StructType structTy = input->getType().cast<StructType>();
+  StructType structTy = input.getType().cast<StructType>();
   assert(index < structTy.getNumElementTypes());
   mlir::Type resultType = structTy.getElementTypes()[index];
 
@@ -126,12 +126,12 @@ void StructAccessOp::build(mlir::Builder *b, mlir::OperationState &state,
 }
 
 static mlir::LogicalResult verify(StructAccessOp op) {
-  StructType structTy = op.input()->getType().cast<StructType>();
+  StructType structTy = op.input().getType().cast<StructType>();
   size_t index = op.index().getZExtValue();
   if (index >= structTy.getNumElementTypes())
     return op.emitOpError()
         << "index should be within the range of the input struct type";
-  mlir::Type resultType = op.getResult()->getType();
+  mlir::Type resultType = op.getResult().getType();
   if (resultType != structTy.getElementTypes()[index])
     return op.emitOpError() << "must have the same result type as the struct "
                                "element referred to by the index";

@@ -142,7 +142,7 @@ mlir::Value MLIRStatements::mlirGen(UnrolledLoopStatement *unrolledLoopStatement
   LOG_SCOPE;
 
   // if no statements, there's nothing to do
-  if (!unrolledLoopStatement->statements || !unrolledLoopStatement->statements->dim) {
+  if (!unrolledLoopStatement->statements || !unrolledLoopStatement->statements->length) {
     return nullptr;
   }
 
@@ -178,14 +178,14 @@ void MLIRStatements::mlirGen(IfStatement *ifStatement){
   mlir::Block *insert = builder.getInsertionBlock();
 
   //Creating two blocks if, else and end
-  mlir::Block *if_then = builder.createBlock(cond->getParentRegion(),
-      cond->getParentRegion()->end());
+  mlir::Block *if_then = builder.createBlock(cond.getParentRegion(),
+      cond.getParentRegion()->end());
   mlir::Block *if_else = nullptr;
   if(ifStatement->elsebody)
-    if_else = builder.createBlock(cond->getParentRegion(),
-                                             cond->getParentRegion()->end());
-  mlir::Block *end_if = builder.createBlock(cond->getParentRegion(),
-                                            cond->getParentRegion()->end());
+    if_else = builder.createBlock(cond.getParentRegion(),
+                                             cond.getParentRegion()->end());
+  mlir::Block *end_if = builder.createBlock(cond.getParentRegion(),
+                                            cond.getParentRegion()->end());
 
   //Getting back to the old insertion point
   builder.setInsertionPointAfter(&insert->back());
@@ -255,7 +255,7 @@ mlir::LogicalResult MLIRStatements::mlirGen(ReturnStatement *returnStatement){
     auto expr = declaration.mlirGen(returnStatement->exp, builder.getInsertionBlock());
     if(!expr)
       return mlir::failure();
-    builder.setInsertionPointToEnd(expr->getDefiningOp()->getBlock());
+    builder.setInsertionPointToEnd(expr.getDefiningOp()->getBlock());
     builder.create<mlir::ReturnOp>(location, mlir::ValueRange(expr));
   }else{
     builder.create<mlir::ReturnOp>(location);
