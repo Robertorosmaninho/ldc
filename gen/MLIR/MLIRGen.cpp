@@ -14,12 +14,14 @@
 #include "dmd/globals.h"
 #include "dmd/identifier.h"
 #include "dmd/init.h"
+#include "dmd/import.h"
 #include "dmd/module.h"
 #include "dmd/statement.h"
 
 #include "gen/llvmhelpers.h"
 #include "gen/irstate.h"
 #include "gen/logger.h"
+#include "gen/MLIR/MLIRGen.h"
 #include "gen/MLIR/MLIRStatements.h"
 
 #include "mlir/Analysis/Verifier.h"
@@ -29,14 +31,12 @@
 #include "mlir/IR/Location.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Module.h"
-#include "mlir/IR/StandardTypes.h"
 #include "mlir/IR/Types.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopedHashTable.h"
 
 #include <memory>
-#include "MLIRGen.h"
 
 using namespace ldc_mlir;
 
@@ -53,22 +53,64 @@ namespace {
 class MLIRGenImpl {
 public:
   MLIRGenImpl(mlir::MLIRContext &context, IRState *irs)
-      : context(context), irs(irs), builder(&context) {}
+      : irs(irs), context(context), builder(&context) {}
 
   mlir::ModuleOp mlirGen(Module *m){
     theModule = mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
+    m->ir->resetAll();
 
-    for(unsigned long k = 0; k < m->members->dim; k++){
+    MLIRDeclaration declaration = MLIRDeclaration(irs, m, context, builder,
+                                                  symbolTable,structMap,
+                                                  total, miss);
+
+    for(unsigned long k = 0; k < m->members->dim; k++) {
+      total++;
       Dsymbol *dsym = (*m->members)[k];
       assert(dsym);
 
-      //Declaration_MLIRcodegen(dsym, mlir_);
+      Logger::println("MLIRCodeGen for '%s'", dsym->toChars());
+
       FuncDeclaration *fd = dsym->isFuncDeclaration();
-      if(fd != nullptr) {
+      if (fd != nullptr) {
         auto func = mlirGen(fd);
         if (!func)
           return nullptr;
         theModule.push_back(func);
+      } else if (StructDeclaration *structDecl = dsym->isStructDeclaration()){
+        if(failed(declaration.mlirGen(structDecl)))
+          return nullptr;
+        IF_LOG Logger::println("MLIRCodeGen - StructLiteralExp: '%s'",
+                               structDecl->toChars());
+        llvm::StringRef structName;
+        if (auto *decl = structDecl){
+          structName = decl->toChars();
+        } else {
+          if(!structDecl->members)
+            return nullptr;
+          for(auto var : *structDecl->members)
+            Logger::println("Expression: '%s'", var->toChars());
+
+        }
+
+      } else if (dsym->isInstantiated()) {
+        IF_LOG Logger::println("isTemplateInstance: '%s'",
+                               dsym->isTemplateInstance()->toChars());
+      } else if (dsym->isImport()) {
+        IF_LOG Logger::println("isImport: %s", dsym->isImport()->toChars());
+      } else if (dsym->isVarDeclaration()) {
+        IF_LOG Logger::println("isVarDeclaration: '%s'",
+                               dsym->isVarDeclaration()->toChars());
+      } else if (ScopeDsymbol *scopeDsymbol = dsym->isScopeDsymbol()) {
+        IF_LOG Logger::println("isScopeDsymbol: '%s'", scopeDsymbol->toChars());
+        LOG_SCOPE
+
+        if(auto *templateInstance = scopeDsymbol->isTemplateInstance()) {
+          declaration.mlirGen(templateInstance);
+        }
+      }else{
+        IF_LOG Logger::println("Unnable to recoganize dsym member: '%s'",
+            dsym->toPrettyChars());
+        miss++;
       }
     }
 
@@ -76,12 +118,17 @@ public:
     // properties of the generated MLIR module.
       if (failed(mlir::verify(theModule))) {
        theModule.emitError("module verification error");
+       total++;
+       miss++;
       return nullptr;
      }
 
+      IF_LOG Logger::println("#### Total: '%u'", total);
+      IF_LOG Logger::println("### Miss: '%u'", miss);
+
     return theModule;
 
-  } //MLIRCodeIMplementatio for a given Module
+  } //MLIRCodeImplementation for a given Module
 
 private:
 
@@ -106,7 +153,15 @@ private:
   /// Entering a function creates a new scope, and the function arguments are
   /// added to the mapping. When the processing of a function is terminated, the
   /// scope is destroyed and the mappings created in this scope are dropped.
-  llvm::ScopedHashTable<StringRef, mlir::Value *> symbolTable;
+  llvm::ScopedHashTable<StringRef, mlir::Value> symbolTable;
+
+  /// A mapping for named struct types to the underlying MLIR type and the
+  /// original AST node.
+  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> structMap;
+
+
+  /// This flags counts the number of hits and misses of our translation.
+  unsigned total = 0, miss = 0;
 
   mlir::Location loc(Loc loc){
     return builder.getFileLineColLoc(builder.getIdentifier(
@@ -115,7 +170,7 @@ private:
 
   /// Declare a variable in the current scope, return success if the variable
   /// wasn't declared yet.
-  mlir::LogicalResult declare(llvm::StringRef var, mlir::Value *value) {
+  mlir::LogicalResult declare(llvm::StringRef var, mlir::Value value) {
     if(symbolTable.count(var))
       return mlir::failure();
     symbolTable.insert(var, value);
@@ -129,24 +184,18 @@ private:
     llvm::SmallVector<mlir::Type, 4> ret_types;
 
     //Supposing that the type is integer
-    auto type = builder.getIntegerType(32);
     unsigned long size = 0;
     if(Fd->parameters)
       size = Fd->parameters->dim;
 
     // Arguments type is uniformly a generic array.
-    llvm::SmallVector<mlir::Type, 4> arg_types(size, type);
+    llvm::SmallVector<mlir::Type, 4> arg_types(size, get_MLIRtype(Fd->parameters));
 
     auto func_type = builder.getFunctionType(arg_types, ret_types);
     auto function = mlir::FuncOp::create(loc(Fd->loc),
                                          StringRef(Fd->mangleString),
-                                         func_type, {});
+                                         func_type, {}); //TODO: Should this have the arguments?
 
-    // Mark the function as generic: it'll require type specialization for every
-    // call site.
-    if (function.getNumArguments()) {
-      function.setAttr("ldc.generic", builder.getUnitAttr());
-    }
 
     return function;
   }
@@ -154,7 +203,7 @@ private:
   /// Emit a new function and add it to the MLIR module.
   mlir::FuncOp mlirGen(FuncDeclaration *Fd) {
     // Create a scope in the symbol table to hold variable declarations.
-    ScopedHashTableScope<llvm::StringRef, mlir::Value *> var_scope(symbolTable);
+    ScopedHashTableScope<llvm::StringRef, mlir::Value> var_scope(symbolTable);
 
     // Create an MLIR function for the given prototype.
     mlir::FuncOp function = mlirGen(Fd, true);
@@ -171,9 +220,10 @@ private:
     // function.
     builder.setInsertionPointToStart(&entryBlock);
 
-    // Initiaize the object to be the "visitor"
-    MLIRStatements *genStmt = new MLIRStatements(irs, irs->dmodule, context,
-                                                 builder, symbolTable);
+    // Initialize the object to be the "visitor"
+    MLIRStatements genStmt = MLIRStatements(irs, irs->dmodule, context,
+                                                 builder, symbolTable, structMap, total,
+                                                 miss);
 
     //Setting arguments of a given function
     unsigned long size = 0;
@@ -192,24 +242,69 @@ private:
     }
     // Emit the body of the function.
 
-    mlir::LogicalResult result = genStmt->genStatements(Fd);
+    mlir::LogicalResult result = genStmt.genStatements(Fd);
     if (mlir::failed(result)) {
       function.erase();
       return nullptr;
     }
+  //  function.getBody().back().back().getParentRegion()->viewGraph();
 
     // Implicitly return void if no return statement was emitted.
     // (this would possibly help the REPL case later)
-    if (function.getBody().back().back().getName().getStringRef() !=
-        "ldc.return") {
+    auto LastOp = function.getBody().back().back().getName().getStringRef();
+    if ( LastOp != "std.return" && LastOp != "std.br" && LastOp != "std.cond_br") {
+     // Logger::println("Num results: %d",function.result);
+      function.getBody().back().back().dump();
       ReturnStatement *returnStatement = Fd->returns->front();
-
-      genStmt->mlirGen(returnStatement);
+      if(returnStatement != nullptr)
+        genStmt.mlirGen(returnStatement);
+      else{
+        builder.create<mlir::ReturnOp>(function.getBody().back().back().getLoc());
+      }
     }
     return function;
   }
 
+    mlir::Type get_MLIRtype(VarDeclarations *varDeclarations){
+      if(varDeclarations == nullptr)
+          return mlir::NoneType::get(&context);
 
+      for(auto vd : *varDeclarations) {
+        auto basetype0 = vd->isDeclaration();
+        Type* basetype = basetype0->type;
+        if (basetype->ty == Tchar || basetype->ty == Twchar ||
+          basetype->ty == Tdchar || basetype->ty == Tnull ||
+          basetype->ty == Tvoid || basetype->ty == Tnone) {
+          return mlir::NoneType::get(&context); //TODO: Build these types on DDialect
+        } else if (basetype->ty == Tint8 || basetype->ty == Tint16 ||
+          basetype->ty == Tint32 || basetype->ty == Tint64 ||
+          basetype->ty == Tint128) {
+          return builder.getIntegerType(basetype->size()*8); //size always return 8 times less the real size
+        } else if (basetype->ty == Tfloat32 || basetype->ty == Tfloat64 ||
+          basetype->ty == Tfloat80) {
+          int size_f = basetype->size();
+          if (size_f == 32)
+            return builder.getF32Type();
+          else if (size_f == 64)
+            return builder.getF64Type();
+          else if (size_f == 80)
+            miss++;     //TODO: Build F80 type on DDialect
+          else
+            miss++;
+        } else if (basetype->ty == Tvector) {
+            mlir::TensorType tensor;
+            return tensor;
+        } else {
+            miss++;
+            MLIRDeclaration *declaration = new MLIRDeclaration(irs, nullptr,
+                    context, builder, symbolTable, structMap, total, miss);
+            mlir::Value value = declaration->mlirGen(vd);
+            return value->getType();
+        }
+      }
+      miss++;
+      return nullptr;
+    }
 }; //class MLIRGenImpl
 } //annonymous namespace
 

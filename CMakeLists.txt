@@ -96,11 +96,11 @@ include(GetLinuxDistribution)
 #
 
 # Version information
-set(LDC_VERSION "1.19.0") # May be overridden by git hash tag
+set(LDC_VERSION "1.20.0") # May be overridden by git hash tag
 set(DMDFE_MAJOR_VERSION   2)
 set(DMDFE_MINOR_VERSION   0)
-set(DMDFE_PATCH_VERSION   89)
-set(DMDFE_FIX_LEVEL       1)
+set(DMDFE_PATCH_VERSION   90)
+set(DMDFE_FIX_LEVEL       0)
 
 set(DMD_VERSION ${DMDFE_MAJOR_VERSION}.${DMDFE_MINOR_VERSION}${DMDFE_PATCH_VERSION})
 if(DEFINED DMDFE_FIX_LEVEL)
@@ -354,10 +354,15 @@ configure_file(driver/ldc-version.cpp.in driver/ldc-version.cpp)
 find_package(MLIR REQUIRED)
 if(MLIR_FOUND)
     message(STATUS "Buiding with MLIR support")
+    include_directories(${MLIR_ROOT_DIR})
     include_directories(${MLIR_INCLUDE_DIRS})
     include_directories(${MLIR_BUILD_INCLUDE_DIRS})
     include_directories(${MLIR_LIB_DIRS})
     add_definitions("-DLDC_MLIR_ENABLED")
+
+    set(LLVM_LINK_COMPONENTS
+        Support
+    )
 
 if(MSVC)
     if(EXISTS "${LLVM_LIBRARY_DIRS}/libMLIR*.lib")
@@ -426,8 +431,8 @@ ${LLVM_LIBRARY_DIRS}/libMLIRVectorOps.${suffix}
 ${LLVM_LIBRARY_DIRS}/libMLIRVectorToLLVM.${suffix}
 )
 
-set(LLVM_LIBRARIES "${MLIR_LIB}"  ${LLVM_LIBRARIES})
-
+set(LLVM_LIBRARIES "${MLIR_LIB}" ${LLVM_LIBRARIES})
+add_subdirectory(gen/MLIR/)
 endif() #if MLIR_FOUND
 
 # Also add the header files to the build so that they are available in IDE
@@ -444,6 +449,7 @@ file(GLOB IR_SRC ir/*.cpp)
 file(GLOB IR_HDR ir/*.h)
 file(GLOB MLIR_HDR gen/MLIR/*.h)
 file(GLOB MLIR_SRC gen/MLIR/*.cpp)
+file(GLOB MLIR_INC gen/MLIR/*.inc)
 set(DRV_SRC
     driver/args.cpp
     driver/cache.cpp
@@ -498,6 +504,7 @@ set(LDC_CXX_SOURCE_FILES
     ${GEN_HDR}
     ${MLIR_HDR}
     ${MLIR_SRC}
+    ${MLIR_INC}
     ${IR_SRC}
     ${IR_HDR}
 )
@@ -514,6 +521,7 @@ source_group("Source Files\\gen" FILES ${GEN_SRC} ${GEN_SRC_D})
 if(MLIR_FOUND)
 source_group("Header Files\\gen\\MLIR" FILES ${MLIR_HDR})
 source_group("Source Files\\gen\\MLIR" FILES ${MLIR_SRC})
+source_group("Source Files\\gen\\MLIR" FILES ${MLIR_INC})
 endif()
 source_group("Header Files\\gen" FILES ${GEN_HDR})
 source_group("Source Files\\ir" FILES ${IR_SRC} ${IR_SRC_D})
@@ -969,6 +977,9 @@ set_target_properties("${LDC_UNITTEST_EXE}" PROPERTIES EXCLUDE_FROM_ALL ON)
 add_test(NAME build-ldc2-unittest COMMAND "${CMAKE_COMMAND}" --build ${CMAKE_BINARY_DIR} --target ldc2-unittest)
 add_test(NAME ldc2-unittest COMMAND ${LDC_UNITTEST_EXE_FULL} --version)
 set_tests_properties(ldc2-unittest PROPERTIES DEPENDS build-ldc2-unittest)
+
+add_dependencies(${LDC_EXE} Ops_H)
+add_dependencies(${LDC_EXE} Ops_CPP)
 
 if(EXISTS "${PROJECT_SOURCE_DIR}/runtime/druntime/src/object.d")
     add_subdirectory(runtime)

@@ -20,11 +20,13 @@
 #include "dmd/declaration.h"
 #include "dmd/expression.h"
 #include "dmd/init.h"
+#include "dmd/template.h"
 #include "dmd/visitor.h"
 
 #include "gen/logger.h"
 #include "gen/modules.h"
 #include "gen/irstate.h"
+#include "gen/MLIR/Dialect.h"
 #include "gen/MLIR/MLIRGen.h"
 
 #include "mlir/Dialect/StandardOps/Ops.h"
@@ -35,6 +37,7 @@
 #include "mlir/IR/Types.h"
 
 #include "llvm/ADT/ScopedHashTable.h"
+#include "llvm/Support/raw_ostream.h"
 
 using llvm::StringRef;
 using llvm::ScopedHashTableScope;
@@ -59,24 +62,60 @@ private:
   /// Entering a function creates a new scope, and the function arguments are
   /// added to the mapping. When the processing of a function is terminated, the
   /// scope is destroyed and the mappings created in this scope are dropped.
-  llvm::ScopedHashTable<StringRef, mlir::Value *> &symbolTable;
+  llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable;
+
+  /// A mapping for named struct types to the underlying MLIR type and the
+  /// original AST node.
+  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> structMap;
+
+  /// Temporary flags to mesure the total amount of hits and misses on our
+  /// translation through MLIR
+  unsigned &_total, &_miss;
 
 public:
   MLIRDeclaration(IRState *irs, Module *m, mlir::MLIRContext &context,
-      mlir::OpBuilder builder_,llvm::ScopedHashTable<StringRef, mlir::Value *> &symbolTable);
+      mlir::OpBuilder builder_,
+      llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
+      llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
+      unsigned &total, unsigned &miss);
   ~MLIRDeclaration();
 
-  mlir::Value* mlirGen(VarDeclaration* varDeclaration);
+  mlir::LogicalResult mlirGen(StructDeclaration* structDeclaration);
+  mlir::Value mlirGen(VarDeclaration* varDeclaration);
+  mlir::Value mlirGen(Declaration* declaration);
+  mlir::DenseElementsAttr getConstantAttr(mlir::Value value);
+  StructDeclaration* getStructFor(StructLiteralExp *structLiteralExp);
+  std::pair<mlir::ArrayAttr, mlir::Type> getConstantAttr(StructDeclaration
+  *structDeclaration = nullptr, StructLiteralExp *structLiteralExp = nullptr);
+  mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
+      mlir::Value rhs, StringRef lhs_name, StringRef rhs_name, int op,
+      bool canSkipPostblitm, Type* t1, Type* t2);
+  mlir::Type get_MLIRtype(Expression* expression, Type* type = nullptr);
 
   //Expression
-  mlir::Value* mlirGen(DeclarationExp* declarationExp);
-  mlir::Value* mlirGen(Expression *expression);
-  mlir::Value* mlirGen(AssignExp *assignExp); //Not perfet yet
-  mlir::Value* mlirGen(ConstructExp *constructExp);
-  mlir::Value* mlirGen(IntegerExp *integerExp);
-  mlir::Value* mlirGen(VarExp *varExp);
-  mlir::Value* mlirGen(CallExp *callExp);
-  mlir::Value* mlirGen(ArrayLiteralExp *arrayLiteralExp);
+  mlir::Value mlirGen(AddExp *addExp = nullptr, AddAssignExp *addAssignExp = nullptr);
+  mlir::Value mlirGen(AndExp *andExp = nullptr, AndAssignExp *andAssignExp = nullptr);
+  mlir::Value mlirGen(ArrayLiteralExp *arrayLiteralExp);
+  mlir::Value mlirGen(AssignExp *assignExp); //Not perfect yet
+  mlir::Value mlirGen(CallExp *callExp);
+  mlir::Value mlirGen(CastExp *castExp);
+  mlir::Value mlirGen(ConstructExp *constructExp);
+  mlir::Value mlirGen(DeclarationExp* declarationExp);
+  mlir::Value mlirGen(DivExp *divExp = nullptr, DivAssignExp *divAssignExp = nullptr);
+  mlir::Value mlirGen(Expression *expression, int func);
+  mlir::Value mlirGen(Expression *expression, mlir::Block *block = nullptr);
+  mlir::Value mlirGen(IntegerExp *integerExp);
+  mlir::Value mlirGen(MinExp *minExp = nullptr, MinAssignExp *minAssignExp = nullptr);
+  mlir::Value mlirGen(ModExp *modExp = nullptr, ModAssignExp *modAssignExp = nullptr);
+  mlir::Value mlirGen(MulExp *mulExp = nullptr, MulAssignExp *mulAssignExp = nullptr);
+  mlir::Value mlirGen(OrExp *orExp = nullptr, OrAssignExp *orAssignExp = nullptr);
+  mlir::Value mlirGen(PostExp *postExp);
+  mlir::Value mlirGen(RealExp *realExp);
+  mlir::Value mlirGen(StringExp *stringExp);
+  mlir::Value mlirGen(StructLiteralExp* structLiteralExp);
+  mlir::Value mlirGen(VarExp *varExp);
+  mlir::Value mlirGen(XorExp *xorExp = nullptr, XorAssignExp *xorAssignExp = nullptr);
+  void mlirGen(TemplateInstance *templateInstance);
 
   ///Set MLIR Location using D Loc info
   mlir::Location loc(Loc loc){
@@ -86,13 +125,12 @@ public:
 
 /// Declare a variable in the current scope, return success if the variable
 /// wasn't declared yet.
-  mlir::LogicalResult declare(llvm::StringRef var, mlir::Value *value) {
+  mlir::LogicalResult declare(llvm::StringRef var, const mlir::Value value) {
     if (symbolTable.count(var))
       return mlir::failure();
     symbolTable.insert(var, value);
     return mlir::success();
   }
-
 };
 
 #endif // LDC_MLIR_ENABLED
