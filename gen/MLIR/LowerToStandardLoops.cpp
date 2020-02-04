@@ -1,7 +1,10 @@
+//===-- LowerToStandardLoops.cpp ------------------------------------------===//
 //
-// Created by Roberto Rosmaninho on 18/12/19.
+//                         LDC – the LLVM D compiler
 //
-
+// This file is distributed under the BSD-style LDC license. See the LICENSE
+// file for details.
+//
 // =============================================================================
 //
 // This file implements a partial lowering of D operations to a combination of

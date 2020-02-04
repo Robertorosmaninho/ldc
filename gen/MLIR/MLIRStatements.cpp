@@ -256,7 +256,8 @@ mlir::LogicalResult MLIRStatements::mlirGen(ReturnStatement *returnStatement){
     if(!expr)
       return mlir::failure();
     builder.setInsertionPointToEnd(expr.getDefiningOp()->getBlock());
-    builder.create<mlir::ReturnOp>(location, mlir::ValueRange(expr));
+    auto ret = builder.create<mlir::ReturnOp>(location, mlir::ValueRange(expr));
+    ret.setAttr("Return", builder.getSymbolRefAttr(ret));
   }else{
     builder.create<mlir::ReturnOp>(location);
   }

@@ -80,13 +80,8 @@ public:
       unsigned &total, unsigned &miss);
   ~MLIRDeclaration();
 
-  mlir::LogicalResult mlirGen(StructDeclaration* structDeclaration);
   mlir::Value mlirGen(VarDeclaration* varDeclaration);
   mlir::Value mlirGen(Declaration* declaration);
-  mlir::DenseElementsAttr getConstantAttr(mlir::Value value);
-  StructDeclaration* getStructFor(StructLiteralExp *structLiteralExp);
-  std::pair<mlir::ArrayAttr, mlir::Type> getConstantAttr(StructDeclaration
-  *structDeclaration = nullptr, StructLiteralExp *structLiteralExp = nullptr);
   mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
       mlir::Value rhs, StringRef lhs_name, StringRef rhs_name, int op,
       bool canSkipPostblitm, Type* t1, Type* t2);
@@ -112,7 +107,6 @@ public:
   mlir::Value mlirGen(PostExp *postExp);
   mlir::Value mlirGen(RealExp *realExp);
   mlir::Value mlirGen(StringExp *stringExp);
-  mlir::Value mlirGen(StructLiteralExp* structLiteralExp);
   mlir::Value mlirGen(VarExp *varExp);
   mlir::Value mlirGen(XorExp *xorExp = nullptr, XorAssignExp *xorAssignExp = nullptr);
   void mlirGen(TemplateInstance *templateInstance);
