@@ -15,10 +15,8 @@
 MLIRDeclaration::MLIRDeclaration(IRState *irs, Module *m,
     mlir::MLIRContext &context, mlir::OpBuilder builder_,
     llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
-    llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
     unsigned &total, unsigned &miss) : irState(irs), module(m), context(context),
-    builder(builder_), symbolTable(symbolTable), structMap(structMap),
-    _total(total), _miss(miss){} //Constructor
+    builder(builder_), symbolTable(symbolTable), _total(total), _miss(miss) {}
 
 MLIRDeclaration::~MLIRDeclaration() = default;
 
@@ -27,81 +25,14 @@ mlir::Value MLIRDeclaration::mlirGen(Declaration *declaration){
       declaration->toChars());
   LOG_SCOPE
 
-  if(StructDeclaration *structDeclaration = declaration->isStructDeclaration()) {
-    if (failed(mlirGen(structDeclaration)))
-      return nullptr;
-  } else if(auto varDeclaration = declaration->isVarDeclaration())
+  if(auto varDeclaration = declaration->isVarDeclaration()) {
     return mlirGen(varDeclaration);
-  else {
-    IF_LOG Logger::println(" "
-                           "---------------------------------------------------- Unable to recoganize Declaration: '%s'",
+  } else {
+    IF_LOG Logger::println("Unable to recoganize Declaration: '%s'",
                            declaration->toChars());
     _miss++;
     return nullptr;
   }
-}
-
-mlir::LogicalResult MLIRDeclaration::mlirGen(StructDeclaration
-*structDeclaration) {
-  IF_LOG Logger::println("MLIRCodeGen - StructDeclaration: '%s'",
-      structDeclaration->toChars());
-
-  if(structMap.count(structDeclaration->toChars()))
-    return mlir::emitError(loc(structDeclaration->loc)) << "error: struct "
-       "type with name '" << structDeclaration->toChars() << "' already exists";
-
-  auto variables = structDeclaration->members;
-  std::vector<mlir::Type> elementTypes;
-  elementTypes.reserve(variables->size());
-  for (auto variable : *variables){
-    Logger::println("Getting Type of '%s'", variable->toChars());
-    if(variable->hasStaticCtorOrDtor())
-      return mlir::emitError(loc(structDeclaration->loc)) << "error: "
-         "variables within a struct definition must not have initializers";
-
-    mlir::Type type = get_MLIRtype(nullptr,variable->getType());
-    if(!type)
-      return mlir::failure();
-    elementTypes.push_back(type);
-  }
-
-  structMap.try_emplace(structDeclaration->toChars(),
-      mlir::D::StructType::get(elementTypes), structDeclaration);
-  return mlir::success();
-}
-
-StructDeclaration* MLIRDeclaration::getStructFor(StructLiteralExp
-                                                 *structLiteralExp){
-  IF_LOG Logger::println("MLIRCodeGen - GetStructFor: '%s'",
-      structLiteralExp->toChars());
-  llvm::StringRef structName;
-  if (auto *decl = structLiteralExp->sd){
-    auto varIt = symbolTable.lookup(decl->toChars());
-    if(!varIt)
-      return nullptr;
-    structName = decl->toChars();
-  } else {
-    if(!structLiteralExp->elements)
-      return nullptr;
-    for(auto var : *structLiteralExp->elements)
-      Logger::println("Expression: '%s'", var->toChars());
-
-  }
-return nullptr;
-}
-
-mlir::Value MLIRDeclaration::mlirGen(StructLiteralExp* structLiteralExp) {
-  IF_LOG Logger::println("MLIRCodeGen - StructLiteralExp: '%s'",
-                         structLiteralExp->toChars());
-
-  mlir::ArrayAttr dataAttr;
-  mlir::Type dataType;
-  std::tie(dataAttr, dataType) = getConstantAttr(nullptr, structLiteralExp);
-
-  // Build the MLIR op `toy.struct_constant`. This invokes the
-  // `StructConstantOp::build` method.
-  return builder.create<mlir::D::StructConstantOp>(loc(structLiteralExp->loc),
-                                                   dataType, dataAttr);
 }
 
 mlir::Value MLIRDeclaration::mlirGen(VarDeclaration *vd){
@@ -120,7 +51,7 @@ mlir::Value MLIRDeclaration::mlirGen(VarDeclaration *vd){
     IF_LOG Logger::println("MLIRCodeGen -  VarDeclaration: dataseg");
     //Declaration_MLIRcodegen(vd, mlir_);
   }else {
-    if (vd->nestedrefs.dim) {
+    if (vd->nestedrefs.length) {
       IF_LOG Logger::println(
             "has nestedref set (referenced by nested function/delegate)");
 
@@ -158,46 +89,6 @@ mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(mlir::Value value) {
   return mlir::DenseElementsAttr::get(dataType, &value);
 }
 
-std::pair<mlir::ArrayAttr, mlir::Type> MLIRDeclaration::getConstantAttr(
-                                StructDeclaration *decl, StructLiteralExp *lit){
-
-/// Emit a constant for a struct literal. It will be emitted as an array of
-/// other literals in an Attribute attached to a `toy.struct_constant`
-/// operation. This function returns the generated constant, along with the
-/// corresponding struct type.
-  std::vector<mlir::Attribute> attrElements;
-  std::vector<mlir::Type> typeElements;
-
-  if(decl != nullptr && lit == nullptr){
-    IF_LOG Logger::println("MLIRCodeGen - Getting ConstantAttr for Struct: "
-                           "'%s'", decl->toChars());
-
-    for(auto &var : *decl->members) {
-      Logger::println("Var: '%s'", var->toChars());
-    }
-  }else {
-    IF_LOG Logger::println("MLIRCodeGen - Getting ConstantAttr for Struct: "
-                           "'%s'", lit->toChars());
-
-    for (auto &var : *lit->elements) {
-      if (auto *number = var->isIntegerExp()) {
-        auto value = mlirGen(number);
-        attrElements.push_back(getConstantAttr(value));
-        typeElements.push_back(value.getType());
-     } else if (auto *real = var->isRealExp()) {
-        auto value = mlirGen(real);
-        attrElements.push_back(getConstantAttr(value));
-        typeElements.push_back(value.getType());
-      }
-
-    }
-  }
-
-  mlir::ArrayAttr dataAttr = builder.getArrayAttr(attrElements);
-  mlir::Type dataType = mlir::D::StructType::get(typeElements);
-  return std::make_pair(dataAttr, dataType);
-}
-
 mlir::Value MLIRDeclaration::DtoAssignMLIR(mlir::Location Loc,
             mlir::Value lhs, mlir::Value rhs,  StringRef lhs_name,
              StringRef rhs_name, int op, bool canSkipPostblit, Type* t1,
@@ -227,7 +118,8 @@ mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp, AddAssignExp *addAssignExp)
 
   if(addAssignExp) {
     IF_LOG Logger::println("MLIRCodeGen - AddExp: '%s' + '%s' @ %s",
-                           addAssignExp->e1->toChars(), addAssignExp->e2->toChars(),
+                           addAssignExp->e1->toChars(),
+                           addAssignExp->e2->toChars(),
                            addAssignExp->type->toChars());
     LOG_SCOPE
     mlir::Location addAssignLoc = loc(addAssignExp->loc);
@@ -236,7 +128,8 @@ mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp, AddAssignExp *addAssignExp)
     e2 = mlirGen(addAssignExp->e2);
   }else if(addExp){
     IF_LOG Logger::println("MLIRCodeGen - AddExp: '%s' + '%s' @ %s",
-                           addExp->e1->toChars(), addExp->e2->toChars(), addExp->type->toChars());
+                           addExp->e1->toChars(), addExp->e2->toChars(),
+                           addExp->type->toChars());
     LOG_SCOPE
     mlir::Location addExpLoc = loc(addExp->loc);
     location = &addExpLoc;
@@ -247,13 +140,13 @@ mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp, AddAssignExp *addAssignExp)
     return nullptr;
   }
 
-  if((e1->getType().isF16() || e1->getType().isF32() || e1->getType().isF64())
-     && (e1->getType() == e2->getType())) {
+  if((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64())
+     && (e1.getType() == e2.getType())) {
     result = builder.create<mlir::AddFOp>(*location, e1,e2).getResult();
   }else
-  if((e1->getType().isInteger(8) || e1->getType().isInteger(16) ||
-      e1->getType().isInteger(32) || e1->getType().isInteger(64)) &&
-      (e1->getType() == e2->getType())) {
+  if((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
+      e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
+      (e1.getType() == e2.getType())) {
     result = builder.create<mlir::AddIOp>(*location, e1, e2).getResult();
   }else {
     _miss++;
@@ -269,7 +162,8 @@ mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp, AndAssignExp *andAssignExp)
 
   if(andAssignExp) {
     IF_LOG Logger::println("MLIRCodeGen - AndExp: '%s' + '%s' @ %s",
-                           andAssignExp->e1->toChars(), andAssignExp->e2->toChars(),
+                           andAssignExp->e1->toChars(),
+                           andAssignExp->e2->toChars(),
                            andAssignExp->type->toChars());
     LOG_SCOPE
     mlir::Location andAssignLoc = loc(andAssignExp->loc);
@@ -278,7 +172,8 @@ mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp, AndAssignExp *andAssignExp)
     e2 = mlirGen(andAssignExp->e2);
   }else if(andExp){
     IF_LOG Logger::println("MLIRCodeGen - AndExp: '%s' + '%s' @ %s",
-                           andExp->e1->toChars(), andExp->e2->toChars(), andExp->type->toChars());
+                           andExp->e1->toChars(), andExp->e2->toChars(),
+                           andExp->type->toChars());
     LOG_SCOPE
     mlir::Location andExpLoc = loc(andExp->loc);
     location = &andExpLoc;
@@ -289,10 +184,10 @@ mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp, AndAssignExp *andAssignExp)
     return nullptr;
   }
 
-  if((e1->getType().isInteger(8) || e1->getType().isInteger(16) ||
-      e1->getType().isInteger(32) || e1->getType().isInteger(64)) &&
-     (e2->getType().isInteger(8) || e2->getType().isInteger(16) ||
-      e2->getType().isInteger(32) || e2->getType().isInteger(64))) {
+  if((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
+      e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
+     (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
+      e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
     result = builder.create<mlir::AndOp>(*location, e1, e2).getResult();
   }else {
     _miss++;
@@ -313,7 +208,7 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp){
 
   // The type of this attribute is tensor the type of the literal with it's
   // shape .
-  mlir::Type elementType = get_MLIRtype(arrayLiteralExp->elements->data[0]);
+  mlir::Type elementType = get_MLIRtype(arrayLiteralExp->elements->front());
   bool isFloat = elementType.isF16() || elementType.isF32() || elementType.isF64();
   Logger::println("@@@@@@@@@@@@@@@@@@@@@@@@ pegou o tipo!");
 
@@ -409,7 +304,7 @@ mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp){
       //TODO: Create test to evaluate this case and transform it into dialect
       // operation
       mlir::OperationState result(loc(assignExp->loc), "assign");
-      result.addTypes(rhs->getType()); // TODO: type
+      result.addTypes(rhs.getType()); // TODO: type
       result.addOperands(rhs);
       value = builder.createOperation(result)->getResult(0);
 
@@ -486,7 +381,7 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp){
   //Get the return type
   mlir::Type ret = nullptr;
   if(callExp->f->returns != nullptr)
-    if(ReturnStatement *returnStatement = *callExp->f->returns->data)
+    if(ReturnStatement *returnStatement = *callExp->f->returns->tdata())
       ret = get_MLIRtype(returnStatement->exp);
 
   if(ret)
@@ -594,9 +489,6 @@ mlir::Value MLIRDeclaration::mlirGen(DeclarationExp *decl_exp){
 
   if (VarDeclaration *vd = dsym->isVarDeclaration())
     return mlirGen(vd);
-  else if(StructDeclaration *structDeclaration = dsym->isStructDeclaration())
-    if(failed(mlirGen(structDeclaration)))
-      return nullptr;
 
   IF_LOG Logger::println("Unable to recoganize DeclarationExp: '%s'",
                          dsym->toChars());
@@ -619,7 +511,8 @@ mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp, DivAssignExp *divAssignExp)
     location = &divAssignLoc;
     e1 = mlirGen(divAssignExp->e1);
     e2 = mlirGen(divAssignExp->e2);
-    if(divAssignExp->e1->type->isunsigned() || divAssignExp->e1->type->isunsigned())
+    if(divAssignExp->e1->type->isunsigned() ||
+       divAssignExp->e1->type->isunsigned())
       isSigned = false;
   } else if (divExp) {
     IF_LOG Logger::println("MLIRCodeGen - DivExp: '%s' + '%s' @ %s",
@@ -637,14 +530,14 @@ mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp, DivAssignExp *divAssignExp)
     return nullptr;
   }
 
-  if((e1->getType().isF16() || e1->getType().isF32() || e1->getType().isF64())
-     && (e2->getType().isF16() || e2->getType().isF32() || e2->getType().isF64())) {
+  if((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
+     (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
     result = builder.create<mlir::DivFOp>(*location, e1, e2).getResult();
   }else
-  if((e1->getType().isInteger(8) || e1->getType().isInteger(16) ||
-      e1->getType().isInteger(32) || e1->getType().isInteger(64)) &&
-     (e2->getType().isInteger(8) || e2->getType().isInteger(16) ||
-      e2->getType().isInteger(32) || e2->getType().isInteger(64))) {
+  if((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
+      e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
+     (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
+      e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
     if(isSigned)
       result = builder.create<mlir::SignedDivIOp>(*location, e1, e2).getResult();
     else
@@ -669,8 +562,8 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, int func){
   mlir::CmpIPredicate predicate;
   mlir::CmpFPredicate predicateF;
 
-  bool isFloat = e1->getType().isF64() || e1->getType().isF32() ||
-                                                        e1->getType().isBF16();
+  bool isFloat = e1.getType().isF64() || e1.getType().isF32() ||
+                 e1.getType().isBF16();
 
   switch(cmpExp->op){
     case TOKlt:
@@ -715,7 +608,7 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, int func){
       break;
   }
 
-  if(isFloat)
+  if (isFloat)
     return builder.create<mlir::CmpFOp>(location, predicateF, e1,e2);
   else
     return builder.create<mlir::CmpIOp>(location, predicate, e1, e2);
@@ -727,7 +620,7 @@ mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp){
   Logger::println("MLIRGen - Integer: '%lu'", dint);
   mlir::Location location = builder.getUnknownLoc();
   auto type = get_MLIRtype(integerExp);
-  if(integerExp->loc.filename == NULL)
+  if (integerExp->loc.filename == NULL)
     location = builder.getUnknownLoc();
   else
     location = loc(integerExp->loc);
@@ -762,16 +655,16 @@ mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp, MinAssignExp *minAssignExp)
     return nullptr;
   }
 
-  if((e1->getType().isF16() || e1->getType().isF32() || e1->getType().isF64())
-     && (e2->getType().isF16() || e2->getType().isF32() || e2->getType().isF64())) {
+  if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
+      (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
     result = builder.create<mlir::SubFOp>(*location, e1, e2).getResult();
-  }else
-  if((e1->getType().isInteger(8) || e1->getType().isInteger(16) ||
-      e1->getType().isInteger(32) || e1->getType().isInteger(64)) &&
-     (e2->getType().isInteger(8) || e2->getType().isInteger(16) ||
-      e2->getType().isInteger(32) || e2->getType().isInteger(64))) {
+  } else
+  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
+      e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
+     (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
+      e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
     result = builder.create<mlir::SubIOp>(*location, e1, e2).getResult();
-  }else {
+  } else {
     _miss++;
     return nullptr;
   }
@@ -786,18 +679,21 @@ mlir::Value MLIRDeclaration::mlirGen(ModExp *modExp, ModAssignExp *modAssignExp)
 
   if(modAssignExp) {
     IF_LOG Logger::println("MLIRCodeGen - ModExp: '%s' + '%s' @ %s",
-                           modAssignExp->e1->toChars(), modAssignExp->e2->toChars(),
+                           modAssignExp->e1->toChars(),
+                           modAssignExp->e2->toChars(),
                            modAssignExp->type->toChars());
     LOG_SCOPE
     mlir::Location modAssignLoc = loc(modAssignExp->loc);
     location = &modAssignLoc;
     e1 = mlirGen(modAssignExp->e1);
     e2 = mlirGen(modAssignExp->e2);
-    if(modAssignExp->e1->type->isunsigned() || modAssignExp->e1->type->isunsigned())
+    if (modAssignExp->e1->type->isunsigned() ||
+        modAssignExp->e1->type->isunsigned())
       isSigned = false;
   }else if(modExp){
     IF_LOG Logger::println("MLIRCodeGen - ModExp: '%s' + '%s' @ %s",
-                           modExp->e1->toChars(), modExp->e2->toChars(), modExp->type->toChars());
+                           modExp->e1->toChars(), modExp->e2->toChars(),
+                           modExp->type->toChars());
     LOG_SCOPE
     mlir::Location modExpLoc = loc(modExp->loc);
     location = &modExpLoc;
@@ -805,24 +701,24 @@ mlir::Value MLIRDeclaration::mlirGen(ModExp *modExp, ModAssignExp *modAssignExp)
     e2 = mlirGen(modExp->e2);
     if(modExp->e1->type->isunsigned() || modExp->e1->type->isunsigned())
       isSigned = false;
-  }else{
+  } else{
     _miss++;
     return nullptr;
   }
 
-  if((e1->getType().isF16() || e1->getType().isF32() || e1->getType().isF64())
-     && (e2->getType().isF16() || e2->getType().isF32() || e2->getType().isF64())) {
+  if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
+      (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
     result = builder.create<mlir::RemFOp>(*location, e1, e2).getResult();
   }else
-  if((e1->getType().isInteger(8) || e1->getType().isInteger(16) ||
-      e1->getType().isInteger(32) || e1->getType().isInteger(64)) &&
-     (e2->getType().isInteger(8) || e2->getType().isInteger(16) ||
-      e2->getType().isInteger(32) || e2->getType().isInteger(64))) {
-    if(isSigned)
+  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
+       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
+      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
+       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
+    if (isSigned)
       result = builder.create<mlir::SignedRemIOp>(*location, e1, e2).getResult();
     else
       result = builder.create<mlir::UnsignedRemIOp>(*location, e1, e2).getResult();
-  }else {
+  } else {
     _miss++;
     return nullptr;
   }
@@ -858,14 +754,14 @@ mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp, MulAssignExp *mulAssignExp)
     return nullptr;
   }
 
-  if((e1->getType().isF16() || e1->getType().isF32() || e1->getType().isF64())
-     && (e2->getType().isF16() || e2->getType().isF32() || e2->getType().isF64())) {
+  if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
+     (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
     result = builder.create<mlir::MulFOp>(*location, e1, e2).getResult();
-  }else
-  if((e1->getType().isInteger(8) || e1->getType().isInteger(16) ||
-      e1->getType().isInteger(32) || e1->getType().isInteger(64)) &&
-     (e2->getType().isInteger(8) || e2->getType().isInteger(16) ||
-      e2->getType().isInteger(32) || e2->getType().isInteger(64))) {
+  } else
+  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
+       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
+      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
+       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
     result = builder.create<mlir::MulIOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
@@ -879,7 +775,7 @@ mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp){
  mlir::Value e1, e2, result;
   mlir::Location *location = nullptr;
 
-  if(orAssignExp) {
+  if (orAssignExp) {
     IF_LOG Logger::println("MLIRCodeGen - OrExp: '%s' + '%s' @ %s",
                            orAssignExp->e1->toChars(),
                            orAssignExp->e2->toChars(),
@@ -889,7 +785,7 @@ mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp){
     location = &orAssignLoc;
     e1 = mlirGen(orAssignExp->e1);
     e2 = mlirGen(orAssignExp->e2);
-  }else if(orExp){
+  } else if(orExp) {
     IF_LOG Logger::println("MLIRCodeGen - OrExp: '%s' + '%s' @ %s",
                            orExp->e1->toChars(), orExp->e2->toChars(),
                            orExp->type->toChars());
@@ -898,17 +794,17 @@ mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp){
     location = &orExpLoc;
     e1 = mlirGen(orExp->e1);
     e2 = mlirGen(orExp->e2);
-  }else{
+  } else {
     _miss++;
     return nullptr;
   }
 
-  if((e1->getType().isInteger(8) || e1->getType().isInteger(16) ||
-      e1->getType().isInteger(32) || e1->getType().isInteger(64)) &&
-     (e2->getType().isInteger(8) || e2->getType().isInteger(16) ||
-      e2->getType().isInteger(32) || e2->getType().isInteger(64))) {
+  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
+       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
+      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
+       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
     result = builder.create<mlir::OrOp>(*location, e1, e2).getResult();
-  }else {
+  } else {
     _miss++;
     return nullptr;
   }
@@ -930,15 +826,15 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp){
   }
 
   int size = 0;
-  if(e1->getType().isInteger(1))
+  if (e1.getType().isInteger(1))
     size = 1;
-  else if(e1->getType().isInteger(8))
+  else if(e1.getType().isInteger(8))
     size = 8;
-  else if(e1->getType().isInteger(16))
+  else if(e1.getType().isInteger(16))
     size = 16;
-  else if(e1->getType().isInteger(32))
+  else if(e1.getType().isInteger(32))
     size = 32;
-  else if(e1->getType().isInteger(64))
+  else if(e1.getType().isInteger(64))
     size = 64;
   else
   IF_LOG Logger::println("MLIR doesn't support integer of type different "
@@ -946,21 +842,21 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp){
 
  mlir::Value e2 = nullptr;
   mlir::Location location = loc(postExp->loc);
-  if(e1->getType().isF32() || e1->getType().isF16() || e1->getType().isF64())
-    e2 = builder.create<mlir::ConstantOp>(location, builder.getFloatAttr
-                                                   (e1->getType(), 1.00));
-  else if(e1->getType().isInteger(size))
-    e2 = builder.create<mlir::ConstantOp>(location, builder.getIntegerAttr
-                                                   (e1->getType(), 1));
-  if(postExp->op == TOKplusplus) {
-    if(e1->getType().isF32() || e1->getType().isF16() || e1->getType().isF64())
+  if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
+    e2 = builder.create<mlir::ConstantOp>(location,
+                                          builder.getFloatAttr(e1.getType(), 1.00));
+  else if (e1.getType().isInteger(size))
+    e2 = builder.create<mlir::ConstantOp>(location,
+                                          builder.getIntegerAttr(e1.getType(), 1));
+  if (postExp->op == TOKplusplus) {
+    if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
       return builder.create<mlir::AddFOp>(location, e1, e2);
-    else if(e1->getType().isInteger(size))
+    else if (e1.getType().isInteger(size))
       return builder.create<mlir::AddIOp>(location, e1, e2);
-  } else if(postExp->op == TOKminusminus) {
-    if (e1->getType().isF32() || e1->getType().isF16() || e1->getType().isF64())
+  } else if (postExp->op == TOKminusminus) {
+    if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
       return builder.create<mlir::SubFOp>(location, e1, e2);
-    else if (e1->getType().isInteger(size))
+    else if (e1.getType().isInteger(size))
       return builder.create<mlir::SubIOp>(location, e1, e2);
   } else {
     _miss++;
@@ -1031,12 +927,12 @@ mlir::Value MLIRDeclaration::mlirGen(XorExp *xorExp, XorAssignExp *xorAssignExp)
     return nullptr;
   }
 
-  if((e1->getType().isInteger(8) || e1->getType().isInteger(16) ||
-      e1->getType().isInteger(32) || e1->getType().isInteger(64)) &&
-     (e2->getType().isInteger(8) || e2->getType().isInteger(16) ||
-      e2->getType().isInteger(32) || e2->getType().isInteger(64))) {
+  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
+       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
+      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
+       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
     result = builder.create<mlir::XOrOp>(*location, e1, e2).getResult();
-  }else {
+  } else {
     _miss++;
     return nullptr;
   }
@@ -1066,7 +962,7 @@ void MLIRDeclaration::mlirGen(TemplateInstance *decl) {
   }
 
   // Force codegen if this is a templated function with pragma(inline, true).
-  if ((decl->members->dim == 1) && ((*decl->members)[0]->isFuncDeclaration()) &&
+  if ((decl->members->length == 1) && ((*decl->members)[0]->isFuncDeclaration()) &&
       ((*decl->members)[0]->isFuncDeclaration()->inlining == PINLINEalways)) {
     Logger::println("needsCodegen() == false, but function is marked with "
                     "pragma(inline, true), so it really does need "
@@ -1109,7 +1005,7 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, mlir::Block* block)
 
   int op = expression->op;
 
-  if(VarExp *varExp = expression->isVarExp())
+  if (VarExp *varExp = expression->isVarExp())
     return mlirGen(varExp);
   else if (DeclarationExp *declarationExp = expression->isDeclarationExp())
     return mlirGen(declarationExp);
@@ -1154,32 +1050,12 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, mlir::Block* block)
     return mlirGen(expression->isOrExp(),expression->isOrAssignExp());
   else if (expression->isXorExp() || expression->isXorAssignExp())
     return mlirGen(expression->isXorExp(),expression->isXorAssignExp());
-  else if(expression->isStructLiteralExp() || expression->isBlitExp()){
-    Logger::println(" ----> PANIC: STRUCT: '%s'", expression->toChars());
-    if(BlitExp* blit = expression->isBlitExp()){
-      Logger::println(" ----> PANIC: Blit: '%s'", blit->toChars());
-      Logger::println(" ----> PANIC: BLIT->E1: '%s'", blit->e1->toChars());
-        mlirGen(blit->e1);
-      Logger::println(" ----> PANIC: BLIT->E2: '%s'", blit->e2->toChars());
-        mlirGen(blit->e2);
-    }else {
-      Logger::println(" ----> PANIC: STRUCTLiteral: '%s'", expression->toChars
-      ());
-    }
-   // auto cu = expression->isBlitExp();
-   //
-   //
-   // mlirGen(expression->isStructLiteralExp()->sd);
-    //getStructFor(expression->isStructLiteralExp());
-    //mlirGen(expression->isStructLiteralExp());
-  }
 
 
   _miss++;
-  IF_LOG Logger::println(" --------------------------------------------------- "
-                         "Unable to recoganize the Expression: '%s' : '%u': '%s'",
-                         expression->toChars(), expression->op,
-                         expression->type->toChars());
+  IF_LOG Logger::println("Unable to recoganize the Expression: '%s' : '%u': "
+                         "'%s'", expression->toChars(), expression->op,
+                                 expression->type->toChars());
   return nullptr;
 }
 
@@ -1199,35 +1075,33 @@ mlir::Type MLIRDeclaration::get_MLIRtype(Expression* expression, Type* type){
         basetype->ty == Tdchar || basetype->ty == Tnull ||
         basetype->ty == Tvoid || basetype->ty == Tnone) {
         return mlir::NoneType::get(&context); //TODO: Build these types on DDialect
-    }else if(basetype->ty == Tbool){
+    } else if (basetype->ty == Tbool){
       return builder.getIntegerType(1);
-    }else if (basetype->ty == Tint8 || basetype->ty == Tuns8){
+    } else if (basetype->ty == Tint8 || basetype->ty == Tuns8){
       return builder.getIntegerType(8);
-    }else if(basetype->ty == Tint16 || basetype->ty == Tuns16){
+    } else if (basetype->ty == Tint16 || basetype->ty == Tuns16){
       return builder.getIntegerType(16);
-    }else if(basetype->ty == Tint32 || basetype->ty == Tuns32){
+    } else if (basetype->ty == Tint32 || basetype->ty == Tuns32){
       return builder.getIntegerType(32);
-    }else if(basetype->ty == Tint64 || basetype->ty == Tuns64){
+    } else if (basetype->ty == Tint64 || basetype->ty == Tuns64){
       return builder.getIntegerType(64);
-    }else if(basetype->ty == Tint128 || basetype->ty == Tuns128) {
+    } else if (basetype->ty == Tint128 || basetype->ty == Tuns128) {
         return builder.getIntegerType(128);
     } else if (basetype->ty == Tfloat32){
       return builder.getF32Type();
-    }else if(basetype->ty == Tfloat64){
+    } else if (basetype->ty == Tfloat64){
       return builder.getF64Type();
-    }else if(basetype->ty == Tfloat80) {
+    } else if (basetype->ty == Tfloat80) {
       _miss++;     //TODO: Build F80 type on DDialect
     } else if (basetype->ty == Tvector) {
         mlir::TensorType tensor;
         return tensor;
     } else {
         _miss++;
-        MLIRDeclaration *declaration = new MLIRDeclaration(irState, nullptr,
-                                                           context, builder,
-                                                           symbolTable,
-                                                           structMap, _total,
-                                                           _miss);
-        mlir::Value value = declaration->mlirGen(expression);
+        MLIRDeclaration declaration(irState, nullptr,context,
+                                    builder,symbolTable,_total,
+                                    _miss);
+        mlir::Value value = declaration.mlirGen(expression);
         return value.getType();
     }
     _miss++;

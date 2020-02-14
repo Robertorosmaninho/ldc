@@ -59,11 +59,10 @@ public:
     theModule = mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
     m->ir->resetAll();
 
-    MLIRDeclaration declaration = MLIRDeclaration(irs, m, context, builder,
-                                                  symbolTable,structMap,
-                                                  total, miss);
+    MLIRDeclaration declaration(irs, m, context, builder, symbolTable,
+                                 total, miss);
 
-    for(unsigned long k = 0; k < m->members->dim; k++) {
+    for(unsigned long k = 0; k < m->members->length; k++) {
       total++;
       Dsymbol *dsym = (*m->members)[k];
       assert(dsym);
@@ -76,22 +75,6 @@ public:
         if (!func)
           return nullptr;
         theModule.push_back(func);
-      } else if (StructDeclaration *structDecl = dsym->isStructDeclaration()){
-        if(failed(declaration.mlirGen(structDecl)))
-          return nullptr;
-        IF_LOG Logger::println("MLIRCodeGen - StructLiteralExp: '%s'",
-                               structDecl->toChars());
-        llvm::StringRef structName;
-        if (auto *decl = structDecl){
-          structName = decl->toChars();
-        } else {
-          if(!structDecl->members)
-            return nullptr;
-          for(auto var : *structDecl->members)
-            Logger::println("Expression: '%s'", var->toChars());
-
-        }
-
       } else if (dsym->isInstantiated()) {
         IF_LOG Logger::println("isTemplateInstance: '%s'",
                                dsym->isTemplateInstance()->toChars());
@@ -186,7 +169,7 @@ private:
     //Supposing that the type is integer
     unsigned long size = 0;
     if(Fd->parameters)
-      size = Fd->parameters->dim;
+      size = Fd->parameters->length;
 
     // Arguments type is uniformly a generic array.
     llvm::SmallVector<mlir::Type, 4> arg_types(size, get_MLIRtype(Fd->parameters));
@@ -221,14 +204,13 @@ private:
     builder.setInsertionPointToStart(&entryBlock);
 
     // Initialize the object to be the "visitor"
-    MLIRStatements genStmt = MLIRStatements(irs, irs->dmodule, context,
-                                                 builder, symbolTable, structMap, total,
-                                                 miss);
+    MLIRStatements genStmt(irs, irs->dmodule, context, builder,
+        symbolTable, total, miss);
 
     //Setting arguments of a given function
     unsigned long size = 0;
     if(Fd->parameters)
-      size = Fd->parameters->dim;
+      size = Fd->parameters->length;
     llvm::SmallVector<VarDeclarations*, 4> args(size, Fd->parameters);
 
     //args.push_back(mlirGen())
@@ -296,10 +278,10 @@ private:
             return tensor;
         } else {
             miss++;
-            MLIRDeclaration *declaration = new MLIRDeclaration(irs, nullptr,
-                    context, builder, symbolTable, structMap, total, miss);
-            mlir::Value value = declaration->mlirGen(vd);
-            return value->getType();
+            MLIRDeclaration declaration(irs, nullptr, context, builder,
+                                     symbolTable, total, miss);
+            mlir::Value value = declaration.mlirGen(vd);
+            return value.getType();
         }
       }
       miss++;

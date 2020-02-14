@@ -64,10 +64,6 @@ private:
   /// scope is destroyed and the mappings created in this scope are dropped.
   llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable;
 
-  /// A mapping for named struct types to the underlying MLIR type and the
-  /// original AST node.
-  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> structMap;
-
   /// Temporary flags to mesure the total amount of hits and misses on our
   /// translation through MLIR
   unsigned &_total, &_miss;
@@ -76,17 +72,12 @@ public:
   MLIRDeclaration(IRState *irs, Module *m, mlir::MLIRContext &context,
       mlir::OpBuilder builder_,
       llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
-      llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
       unsigned &total, unsigned &miss);
   ~MLIRDeclaration();
 
-  mlir::LogicalResult mlirGen(StructDeclaration* structDeclaration);
   mlir::Value mlirGen(VarDeclaration* varDeclaration);
   mlir::Value mlirGen(Declaration* declaration);
   mlir::DenseElementsAttr getConstantAttr(mlir::Value value);
-  StructDeclaration* getStructFor(StructLiteralExp *structLiteralExp);
-  std::pair<mlir::ArrayAttr, mlir::Type> getConstantAttr(StructDeclaration
-  *structDeclaration = nullptr, StructLiteralExp *structLiteralExp = nullptr);
   mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
       mlir::Value rhs, StringRef lhs_name, StringRef rhs_name, int op,
       bool canSkipPostblitm, Type* t1, Type* t2);
@@ -112,7 +103,6 @@ public:
   mlir::Value mlirGen(PostExp *postExp);
   mlir::Value mlirGen(RealExp *realExp);
   mlir::Value mlirGen(StringExp *stringExp);
-  mlir::Value mlirGen(StructLiteralExp* structLiteralExp);
   mlir::Value mlirGen(VarExp *varExp);
   mlir::Value mlirGen(XorExp *xorExp = nullptr, XorAssignExp *xorAssignExp = nullptr);
   void mlirGen(TemplateInstance *templateInstance);
