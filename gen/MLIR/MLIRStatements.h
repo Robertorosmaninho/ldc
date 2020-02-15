@@ -62,17 +62,23 @@ private:
   ///Class to deal with all declarations.
   MLIRDeclaration *declaration = nullptr;
 
+  unsigned &_total, &_miss;
+  unsigned decl_total = 0, decl_miss = 0;
+
 public:
   MLIRStatements(IRState *irs, Module *m, mlir::MLIRContext &context,
       mlir::OpBuilder builder_, llvm::ScopedHashTable<StringRef, mlir::Value
-      *> &symbolTable);
+      *> &symbolTable, unsigned &total, unsigned &miss);
   ~MLIRStatements();
+  void mlirGen(IfStatement *ifStatement);
   mlir::Value* mlirGen(Statement *statement);
   mlir::Value* mlirGen(ExpStatement *expStatement);
+  mlir::Value* mlirGen(ForStatement *forStatement);
+  mlir::Value* mlirGen(UnrolledLoopStatement *unrolledLoopStatement);
   mlir::LogicalResult mlirGen(ReturnStatement *returnStatement);
-  void mlirGen(CompoundStatement *compoundStatement);
-  mlir::Value *mlirGen(Expression *exp);
   mlir::LogicalResult genStatements(FuncDeclaration *funcDeclaration);
+  std::vector<mlir::Value*> mlirGen(CompoundStatement *compoundStatement);
+  std::vector<mlir::Value*> mlirGen(ScopeStatement *scopeStatement);
 
   mlir::Location loc(Loc loc){
     return builder.getFileLineColLoc(builder.getIdentifier(

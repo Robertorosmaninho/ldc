@@ -20,6 +20,7 @@
 #include "dmd/declaration.h"
 #include "dmd/expression.h"
 #include "dmd/init.h"
+#include "dmd/template.h"
 #include "dmd/visitor.h"
 
 #include "gen/logger.h"
@@ -61,22 +62,35 @@ private:
   /// scope is destroyed and the mappings created in this scope are dropped.
   llvm::ScopedHashTable<StringRef, mlir::Value *> &symbolTable;
 
+  /// Temporary flags to mesure the total amount of hits and misses on our
+  /// translation through MLIR
+  unsigned &_total, &_miss;
+
 public:
   MLIRDeclaration(IRState *irs, Module *m, mlir::MLIRContext &context,
-      mlir::OpBuilder builder_,llvm::ScopedHashTable<StringRef, mlir::Value *> &symbolTable);
+      mlir::OpBuilder builder_,
+      llvm::ScopedHashTable<StringRef, mlir::Value*> &symbolTable, unsigned
+      &total, unsigned &miss);
   ~MLIRDeclaration();
 
   mlir::Value* mlirGen(VarDeclaration* varDeclaration);
+  mlir::Value* mlirGen(Declaration* declaration);
+  mlir::Value* DtoAssignMLIR(mlir::Location Loc, mlir::Value* lhs,
+      mlir::Value* rhs, int op, bool canSkipPostblitm, Type* t1, Type* t2);
 
   //Expression
   mlir::Value* mlirGen(DeclarationExp* declarationExp);
-  mlir::Value* mlirGen(Expression *expression);
+  mlir::Value* mlirGen(Expression *expression, mlir::Block *block = nullptr);
   mlir::Value* mlirGen(AssignExp *assignExp); //Not perfet yet
   mlir::Value* mlirGen(ConstructExp *constructExp);
   mlir::Value* mlirGen(IntegerExp *integerExp);
   mlir::Value* mlirGen(VarExp *varExp);
   mlir::Value* mlirGen(CallExp *callExp);
   mlir::Value* mlirGen(ArrayLiteralExp *arrayLiteralExp);
+  mlir::Value* mlirGen(AndAssignExp *addAssignExp);
+  mlir::Value* mlirGen(Expression *expression, int func);
+  void mlirGen(TemplateInstance *templateInstance);
+  mlir::Value* mlirGen(PostExp *postExp);
 
   ///Set MLIR Location using D Loc info
   mlir::Location loc(Loc loc){
@@ -92,7 +106,6 @@ public:
     symbolTable.insert(var, value);
     return mlir::success();
   }
-
 };
 
 #endif // LDC_MLIR_ENABLED
