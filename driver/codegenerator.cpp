@@ -18,6 +18,10 @@
 #include "driver/cl_options_instrumentation.h"
 #include "driver/linker.h"
 #include "driver/toobj.h"
+#if LDC_MLIR_ENABLED
+#include "driver/tomlirfile.h"
+#include "include/mlir/Pass/PassManager.h"
+#endif
 #include "gen/dynamiccompile.h"
 #include "gen/logger.h"
 #include "gen/modules.h"
@@ -201,6 +205,16 @@ void emitLLVMUsedArray(IRState &irs) {
 namespace ldc {
 CodeGenerator::CodeGenerator(llvm::LLVMContext &context, bool singleObj)
     : context_(context), moduleCount_(0), singleObj_(singleObj), ir_(nullptr) {
+CodeGenerator::CodeGenerator(llvm::LLVMContext &context,
+#if LDC_MLIR_ENABLED
+    mlir::MLIRContext &mlirContext,
+#endif
+bool singleObj)
+    : context_(context), moduleCount_(0), singleObj_(singleObj), ir_(nullptr)
+#if LDC_MLIR_ENABLED
+    , mlirContext_(mlirContext)
+#endif
+{
   // Set the context to discard value names when not generating textual IR.
   if (!global.params.output_ll) {
     context_.setDiscardValueNames(true);

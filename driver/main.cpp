@@ -66,7 +66,15 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <memory.h>
 
+#if LDC_MLIR_ENABLED
+#include "mlir/IR/Dialect.h"
+#include "mlir/IR/MLIRContext.h"
+
+#include "gen/MLIR/Dialect.h"
+#include "gen/MLIR/MLIRGen.h"
+#endif
 #if LDC_LLVM_VER >= 600
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #else
@@ -1082,6 +1090,15 @@ void codegenModules(Modules &modules) {
   // Generate one or more object/IR/bitcode files/dcompute kernels.
   if (global.params.obj && !modules.empty()) {
     ldc::CodeGenerator cg(getGlobalContext(), global.params.oneobj);
+#if LDC_MLIR_ENABLED
+    //Registering DDialect and getting mlircontext with it
+    mlir::registerDialect<mlir::D::DDialect>();
+    mlir::MLIRContext mlircontext;
+    ldc::CodeGenerator cg(getGlobalContext(), mlircontext,
+                                                         global.params.oneobj);
+#else
+		ldc::CodeGenerator cg(getGlobalContext(), global.params.oneobj);
+#endif
     DComputeCodeGenManager dccg(getGlobalContext());
     std::vector<Module *> computeModules;
     // When inlining is enabled, we are calling semantic3 on function

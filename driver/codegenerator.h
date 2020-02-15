@@ -26,6 +26,11 @@ namespace ldc {
 class CodeGenerator {
 public:
   CodeGenerator(llvm::LLVMContext &context, bool singleObj);
+  CodeGenerator(llvm::LLVMContext &context, 
+#if LDC_MLIR_ENABLED	
+	mlir::MLIRContext &mlirContext,
+#endif
+    bool singleObj);
   ~CodeGenerator();
   void emit(Module *m);
 
@@ -38,5 +43,9 @@ private:
   int moduleCount_;
   bool const singleObj_;
   IRState *ir_;
+#if LDC_MLIR_ENABLED
+  mlir::MLIRContext &mlirContext_;
+#endif
+
 };
 }
