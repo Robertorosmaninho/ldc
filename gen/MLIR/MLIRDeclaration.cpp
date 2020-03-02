@@ -50,7 +50,7 @@ mlir::Value MLIRDeclaration::mlirGen(VarDeclaration *vd){
   if (vd->isDataseg()) {
     IF_LOG Logger::println("MLIRCodeGen -  VarDeclaration: dataseg");
     //Declaration_MLIRcodegen(vd, mlir_);
-  }else {
+  } else {
     if (vd->nestedrefs.length) {
       IF_LOG Logger::println(
             "has nestedref set (referenced by nested function/delegate)");
@@ -69,8 +69,7 @@ mlir::Value MLIRDeclaration::mlirGen(VarDeclaration *vd){
         LOG_SCOPE
         return mlirGen(ex->exp);
       }
-    }
-    else{
+    } else{
       IF_LOG Logger::println("Unable to recoganize VarDeclaration: '%s'",
                              vd->toChars());
     }
