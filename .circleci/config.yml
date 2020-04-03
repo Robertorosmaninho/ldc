@@ -20,12 +20,12 @@ commonSteps: &commonSteps
             update-alternatives --install /usr/bin/ld ld /usr/bin/ld.gold 99
           else
             # Download & extract CMake
-            curl -L -o cmake.tar.gz https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.13.4-Darwin-x86_64.tar.gz
+            curl -L -o cmake.tar.gz https://github.com/Kitware/CMake/releases/download/v3.16.5/cmake-3.16.5-Darwin-x86_64.tar.gz
             mkdir cmake
             tar -xf cmake.tar.gz --strip 3 -C cmake
             rm cmake.tar.gz
             # Download & extract Ninja
-            curl -OL https://github.com/ninja-build/ninja/releases/download/v1.9.0/ninja-mac.zip
+            curl -OL https://github.com/ninja-build/ninja/releases/download/v1.10.0/ninja-mac.zip
             mkdir ninja
             tar -xf ninja-mac.zip -C ninja
             rm ninja-mac.zip
@@ -66,10 +66,10 @@ commonSteps: &commonSteps
             -DCMAKE_BUILD_TYPE=Release \
             -DD_COMPILER=$PWD/../host-ldc/bin/ldmd2 \
             $EXTRA_CMAKE_FLAGS
-          # Work around out-of-memory errors - retry twice with -j2 and one last time with -j1
+          # Work around out-of-memory errors - retry twice with parallelization and one last time serially
           targets='all ldc2-unittest all-test-runners'
           for i in {1..3}; do
-            ninja -j2 $targets && break || true
+            ninja -j$PARALLELISM $targets && break || true
           done
           ninja -j1 $targets
           bin/ldc2 -version
@@ -80,7 +80,7 @@ commonSteps: &commonSteps
     - run:
         name: Run LIT testsuite
         when: always
-        command: cd ../build && ctest -V -R lit-tests
+        command: cd ../build/tests && python runlit.py -v -j $PARALLELISM .
     - run:
         name: Run DMD testsuite
         when: always
@@ -90,11 +90,11 @@ commonSteps: &commonSteps
             # Circle's RAM disk FS apparently doesn't allow long paths.
             rm ../project/tests/d2/dmd-testsuite/compilable/issue17167.sh
           fi
-          DMD_TESTSUITE_MAKE_ARGS=-j3 ctest -V -R dmd-testsuite
+          DMD_TESTSUITE_MAKE_ARGS=-j$PARALLELISM ctest -V -R dmd-testsuite
     - run:
         name: Run defaultlib unittests & druntime stand-alone tests
         when: always
-        command: cd ../build && ctest -j3 --output-on-failure -E "dmd-testsuite|ldc2-unittest|lit-tests"
+        command: cd ../build && ctest -j$PARALLELISM --output-on-failure -E "dmd-testsuite|ldc2-unittest|lit-tests"
 
 version: 2
 jobs:
@@ -103,37 +103,41 @@ jobs:
     docker:
       - image: ubuntu:18.04
     environment:
+      - PARALLELISM: 2
       - CI_OS: linux
       - LIBCLANG_COMMON_VERSION: "6.0"
-      - HOST_LDC_VERSION: 1.19.0
+      - HOST_LDC_VERSION: 1.20.1
       - EXTRA_CMAKE_FLAGS: "-DMULTILIB=ON -DRT_SUPPORT_SANITIZERS=ON -DBUILD_LTO_LIBS=ON -DLDC_INSTALL_LTOPLUGIN=ON -DLDC_INSTALL_LLVM_RUNTIME_LIBS=ON"
   Ubuntu-rolling-multilib-sharedLibsOnly-gdmd:
     <<: *commonSteps
     docker:
       - image: ubuntu:rolling
     environment:
+      - PARALLELISM: 2
       - CI_OS: linux
       - LIBCLANG_COMMON_VERSION: "9"
       - EXTRA_APT_PACKAGES: gdmd
-      - HOST_LDC_VERSION: 1.19.0
+      - HOST_LDC_VERSION: 1.20.1
       - EXTRA_CMAKE_FLAGS: "-DMULTILIB=ON -DBUILD_SHARED_LIBS=ON -DBUILD_LTO_LIBS=ON -DLDC_INSTALL_LTOPLUGIN=ON -DLDC_INSTALL_LLVM_RUNTIME_LIBS=ON -DD_COMPILER=gdmd"
   macOS-x64:
     <<: *commonSteps
     macos:
-      xcode: "11.3.1"
+      xcode: "11.4.0"
     environment:
+      - PARALLELISM: 4
       - CI_OS: osx
-      - LLVM_VERSION: 9.0.1
-      - HOST_LDC_VERSION: 1.19.0
+      - LLVM_VERSION: 10.0.0
+      - HOST_LDC_VERSION: 1.20.1
       - EXTRA_CMAKE_FLAGS: "-DBUILD_LTO_LIBS=ON"
   macOS-x64-sharedLibsOnly:
     <<: *commonSteps
     macos:
-      xcode: "11.3.1"
+      xcode: "11.4.0"
     environment:
+      - PARALLELISM: 4
       - CI_OS: osx
-      - LLVM_VERSION: 9.0.1
-      - HOST_LDC_VERSION: 1.19.0
+      - LLVM_VERSION: 10.0.0
+      - HOST_LDC_VERSION: 1.20.1
       - EXTRA_CMAKE_FLAGS: "-DBUILD_SHARED_LIBS=ON -DBUILD_LTO_LIBS=ON"
 
 workflows:

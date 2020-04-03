@@ -9,8 +9,10 @@
 
 module dmd.ldcbindings;
 
+import dmd.arraytypes : Strings;
 import dmd.expression;
 import dmd.globals;
+import dmd.iasmgcc;
 import dmd.identifier;
 import dmd.mtype;
 import dmd.declaration;
@@ -70,5 +72,8 @@ mixin(factory!RealExp);
 mixin(factory!DsymbolExp);
 mixin(factory!Expression);
 mixin(factory!InlineAsmStatement);
+mixin(factory!GccAsmStatement);
 mixin(factory!TypeDelegate);
 mixin(factory!TypeIdentifier);
+
+Strings* createStrings() { return new Strings(); }

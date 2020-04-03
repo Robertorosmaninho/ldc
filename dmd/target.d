@@ -2,7 +2,7 @@
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
- * Copyright:   Copyright (C) 1999-2019 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/target.d, _target.d)
@@ -28,9 +28,9 @@ import dmd.identifier;
 import dmd.mtype;
 import dmd.typesem;
 import dmd.tokens : TOK;
-import dmd.utils : toDString;
 import dmd.root.ctfloat;
 import dmd.root.outbuffer;
+import dmd.root.string : toDString;
 
 version (IN_LLVM) import gen.llvmhelpers;
 
@@ -105,12 +105,12 @@ version (IN_LLVM)
     uint alignsize(Type type);
     uint fieldalign(Type type);
 
-    uint critsecsize()
+    uint critsecsize(const ref Loc loc)
     {
         if (c.criticalSectionSize == 0)
         {
             import dmd.errors;
-            error(Loc.initial, "Unknown critical section size");
+            error(loc, "unknown critical section size for the selected target");
             fatal();
         }
         return c.criticalSectionSize;

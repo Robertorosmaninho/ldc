@@ -33,10 +33,13 @@ union CTFloatUnion {
 APFloat parseLiteral(const llvm::fltSemantics &semantics, const char *literal,
                      bool *isOutOfRange = nullptr) {
   APFloat ap(semantics, APFloat::uninitialized);
-  auto r = ap.convertFromString(literal, APFloat::rmNearestTiesToEven);
-  llvm::consumeError(r.takeError());
-  if (isOutOfRange && r) {
-      *isOutOfRange = (r.get() & (APFloat::opOverflow | APFloat::opUnderflow)) != 0;
+  auto r =
+#if LDC_LLVM_VER >= 1000
+      llvm::cantFail
+#endif
+      (ap.convertFromString(literal, APFloat::rmNearestTiesToEven));
+  if (isOutOfRange) {
+    *isOutOfRange = (r & (APFloat::opOverflow | APFloat::opUnderflow)) != 0;
   }
   return ap;
 }

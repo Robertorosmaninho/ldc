@@ -74,7 +74,7 @@ libraries is available on the project wiki for
 [Linux, macOS, BSD, and Android](http://wiki.dlang.org/Building_LDC_from_source) and
 [Windows](http://wiki.dlang.org/Building_and_hacking_LDC_on_Windows_using_MSVC).
 
-If you have a working C++/D build environment, CMake, and a current LLVM
+If you have a working C++/D build environment, CMake, and a recent LLVM
 version (≥ 3.9) available, there should be no big surprises. Do not
 forget to make sure all the submodules (druntime, phobos, dmd-testsuite)
 are up to date:
@@ -82,16 +82,16 @@ are up to date:
     $ cd ldc
     $ git submodule update --init
 
-(DMD and LDC are supported as host compilers. For bootstrapping
-purposes, LDC 0.17, the last version not to require a D compiler, is
-maintained in the `ltsmaster` branch).
+(DMD, GDC and LDC are supported as host compilers. For bootstrapping
+purposes, we recommend GDC via its `gdmd` wrapper. Alternatively, LDC 0.17,
+the last version not to require a D compiler, is maintained to some degree in
+the `ltsmaster` branch.)
 
 ### Cross-compiling
 
-We've recently added a cross-compilation tool to make it easier to build the D
-runtime and standard library for other platforms, `ldc-build-runtime`. Full
-instructions and example invocations are provided
-[on its wiki page](https://wiki.dlang.org/Building_LDC_runtime_libraries).
+Similar to other LLVM-based compilers, cross-compiling with LDC is simple.
+Full instructions and example invocations are provided on the dedicated
+[Wiki page](https://wiki.dlang.org/Cross-compiling_with_LDC).
 
 Contact
 -------
@@ -110,7 +110,7 @@ Feedback of any kind is very much appreciated!
 [0]: https://github.com/ldc-developers/ldc/releases/latest
 [1]: https://dev.azure.com/ldc-developers/ldc/_build/latest?definitionId=1&branchName=master
 [2]: https://circleci.com/gh/ldc-developers/ldc/tree/master
-[3]: https://cirrus-ci.com/github/ldc-developers/ldc
+[3]: https://cirrus-ci.com/github/ldc-developers/ldc/master
 [4]: https://app.shippable.com/github/ldc-developers/ldc/runs?branchName=master
 [5]: https://travis-ci.org/ldc-developers/ldc/branches
 [6]: https://www.bountysource.com/teams/ldc-developers/issues

@@ -1,6 +1,6 @@
 
 /* Compiler implementation of the D programming language
- * Copyright (C) 2013-2019 by The D Language Foundation, All Rights Reserved
+ * Copyright (C) 2013-2020 by The D Language Foundation, All Rights Reserved
  * written by Iain Buclaw
  * http://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
@@ -97,7 +97,11 @@ struct Target
     // Type sizes and support.
     unsigned alignsize(Type *type);
     unsigned fieldalign(Type *type);
+#if IN_LLVM
+    unsigned critsecsize(const Loc &loc);
+#else
     unsigned critsecsize();
+#endif
     Type *va_listType();  // get type of va_list
     int isVectorTypeSupported(int sz, Type *type);
     bool isVectorOpSupported(Type *type, TOK op, Type *t2 = NULL);
