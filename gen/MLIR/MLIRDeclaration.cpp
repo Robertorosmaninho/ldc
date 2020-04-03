@@ -1108,5 +1108,4 @@ mlir::Type MLIRDeclaration::get_MLIRtype(Expression* expression, Type* type){
     return nullptr;
 }
 
-
 #endif //LDC_MLIR_ENABLED

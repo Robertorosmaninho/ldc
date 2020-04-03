@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 #if LDC_MLIR_ENABLED
 
-#include <include/mlir/Dialect/StandardOps/Ops.h>
+#include "mlir/Dialect/StandardOps/Ops.h"
 #include "gen/MLIR/Dialect.h"
 #include "gen/logger.h"
 

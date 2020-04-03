@@ -14,8 +14,6 @@
 
 #if LDC_MLIR_ENABLED
 
-#define LDC_MLIRSTATMENTS_H
-
 #include "dmd/statement.h"
 #include "dmd/statement.h"
 #include "dmd/expression.h"

@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 #if LDC_MLIR_ENABLED
-#define LDC_MLIRGEN_H
 
 #include "mlir/IR/MLIRContext.h"
 #include "dmd/module.h"
