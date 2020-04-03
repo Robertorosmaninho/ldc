@@ -93,9 +93,6 @@ void gendocfile(Module *m);
 void generateJson(Modules *modules);
 
 using namespace opts;
-#if LDC_MLIR_ENABLED
-using namespace ldc_mlir;
-#endif
 
 static StringsAdapter impPathsStore("I", global.params.imppath);
 static cl::list<std::string, StringsAdapter>

@@ -1,6 +1,6 @@
 //===-- ctfloat.cpp -------------------------------------------------------===//
 //
-//                         LDC – the LLVM D compiler
+//                         LDC ï¿½ the LLVM D compiler
 //
 // This file is distributed under the BSD-style LDC license. See the LICENSE
 // file for details.
@@ -9,6 +9,7 @@
 
 #include "dmd/root/ctfloat.h"
 #include "gen/llvm.h"
+#include "gen/logger.h"
 #include "llvm/Support/Error.h"
 
 using llvm::APFloat;
@@ -32,9 +33,10 @@ union CTFloatUnion {
 APFloat parseLiteral(const llvm::fltSemantics &semantics, const char *literal,
                      bool *isOutOfRange = nullptr) {
   APFloat ap(semantics, APFloat::uninitialized);
-  const auto r = ap.convertFromString(literal, APFloat::rmNearestTiesToEven);
-  if (isOutOfRange) {
-    *isOutOfRange = (r & (APFloat::opOverflow | APFloat::opUnderflow)) != 0;
+  auto r = ap.convertFromString(literal, APFloat::rmNearestTiesToEven);
+  llvm::consumeError(r.takeError());
+  if (isOutOfRange && r) {
+      *isOutOfRange = (r.get() & (APFloat::opOverflow | APFloat::opUnderflow)) != 0;
   }
   return ap;
 }
