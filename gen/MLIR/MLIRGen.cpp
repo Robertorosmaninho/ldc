@@ -163,8 +163,11 @@ private:
   //Create the DSymbol for an MLIR Function with as many argument as the
   //provided by Module
   mlir::FuncOp mlirGen(FuncDeclaration *Fd, bool level){
-    // This is a generic function, the return type will be inferred later.
+
+    //Assuming that the function will only return one value from it's type
     llvm::SmallVector<mlir::Type, 4> ret_types;
+    if(!Fd->returns->empty())
+      ret_types.push_back(get_MLIRtype(nullptr, Fd->returns->front()->exp->type));
 
     //Supposing that the type is integer
     unsigned long size = 0;
@@ -172,14 +175,13 @@ private:
       size = Fd->parameters->length;
 
     // Arguments type is uniformly a generic array.
-    llvm::SmallVector<mlir::Type, 4> arg_types(size, get_MLIRtype(Fd->parameters));
+    llvm::SmallVector<mlir::Type, 4> arg_types(size,
+        get_MLIRtype(Fd->parameters, nullptr));
 
     auto func_type = builder.getFunctionType(arg_types, ret_types);
     auto function = mlir::FuncOp::create(loc(Fd->loc),
                                          StringRef(Fd->mangleString),
                                          func_type, {}); //TODO: Should this have the arguments?
-
-
     return function;
   }
 
@@ -235,7 +237,7 @@ private:
     // (this would possibly help the REPL case later)
     auto LastOp = function.getBody().back().back().getName().getStringRef();
     if ( LastOp != "std.return" && LastOp != "std.br" && LastOp != "std.cond_br") {
-     // Logger::println("Num results: %d",function.result);
+
       function.getBody().back().back().dump();
       ReturnStatement *returnStatement = Fd->returns->front();
       if(returnStatement != nullptr)
@@ -247,46 +249,52 @@ private:
     return function;
   }
 
-    mlir::Type get_MLIRtype(VarDeclarations *varDeclarations){
-      if(varDeclarations == nullptr)
-          return mlir::NoneType::get(&context);
+  mlir::Type get_MLIRtype(VarDeclarations *varDeclarations, Type* type){
+    if((varDeclarations == nullptr || varDeclarations->empty()) && type == nullptr)
+      return mlir::NoneType::get(&context);
 
-      for(auto vd : *varDeclarations) {
-        auto basetype0 = vd->isDeclaration();
-        Type* basetype = basetype0->type;
-        if (basetype->ty == Tchar || basetype->ty == Twchar ||
-          basetype->ty == Tdchar || basetype->ty == Tnull ||
-          basetype->ty == Tvoid || basetype->ty == Tnone) {
-          return mlir::NoneType::get(&context); //TODO: Build these types on DDialect
-        } else if (basetype->ty == Tint8 || basetype->ty == Tint16 ||
-          basetype->ty == Tint32 || basetype->ty == Tint64 ||
-          basetype->ty == Tint128) {
-          return builder.getIntegerType(basetype->size()*8); //size always return 8 times less the real size
-        } else if (basetype->ty == Tfloat32 || basetype->ty == Tfloat64 ||
-          basetype->ty == Tfloat80) {
-          int size_f = basetype->size();
-          if (size_f == 32)
-            return builder.getF32Type();
-          else if (size_f == 64)
-            return builder.getF64Type();
-          else if (size_f == 80)
-            miss++;     //TODO: Build F80 type on DDialect
-          else
-            miss++;
-        } else if (basetype->ty == Tvector) {
-            mlir::TensorType tensor;
-            return tensor;
-        } else {
-            miss++;
-            MLIRDeclaration declaration(irs, nullptr, context, builder,
-                                     symbolTable, total, miss);
-            mlir::Value value = declaration.mlirGen(vd);
-            return value.getType();
-        }
-      }
+    Type* basetype = nullptr;
+    if(type != nullptr)
+      basetype = type;
+    else
+      basetype = varDeclarations->front()->isDeclaration()->type;
+
+    if (basetype->ty == Tchar || basetype->ty == Twchar ||
+        basetype->ty == Tdchar || basetype->ty == Tnull ||
+        basetype->ty == Tvoid || basetype->ty == Tnone) {
+      return mlir::NoneType::get(&context); //TODO: Build these types on DDialect
+    } else if (basetype->ty == Tbool){
+      return builder.getIntegerType(1);
+    } else if (basetype->ty == Tint8 || basetype->ty == Tuns8){
+      return builder.getIntegerType(8);
+    } else if (basetype->ty == Tint16 || basetype->ty == Tuns16){
+      return builder.getIntegerType(16);
+    } else if (basetype->ty == Tint32 || basetype->ty == Tuns32){
+      return builder.getIntegerType(32);
+    } else if (basetype->ty == Tint64 || basetype->ty == Tuns64){
+      return builder.getIntegerType(64);
+    } else if (basetype->ty == Tint128 || basetype->ty == Tuns128) {
+      return builder.getIntegerType(128);
+    } else if (basetype->ty == Tfloat32){
+      return builder.getF32Type();
+    } else if (basetype->ty == Tfloat64){
+      return builder.getF64Type();
+    } else if (basetype->ty == Tfloat80) {
+      miss++;     //TODO: Build F80 type on DDialect
+    } else if (basetype->ty == Tvector) {
+      mlir::TensorType tensor;
+      return tensor;
+    } else {
       miss++;
-      return nullptr;
+      MLIRDeclaration declaration(irs, nullptr, context, builder,
+                               symbolTable, total, miss);
+      mlir::Value value = declaration.mlirGen(varDeclarations->front());
+      return value.getType();
     }
+
+    miss++;
+    return nullptr;
+  }
 }; //class MLIRGenImpl
 } //annonymous namespace
 

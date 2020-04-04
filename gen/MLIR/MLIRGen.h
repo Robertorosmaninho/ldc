@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 #if LDC_MLIR_ENABLED
 
-#include "mlir/IR/MLIRContext.h"
 #include "dmd/module.h"
+#include "mlir/IR/MLIRContext.h"
 
 #include <memory>
 

@@ -169,12 +169,6 @@ void DToStandardLoweringPass::runOnFunction() {
   if (function.getName() != "_Dmain")
     return;
 
-  // Verify that the given main has no inputs and results.
-  if (function.getNumArguments() || function.getType().getNumResults()) {
-    function.emitError("expected 'main' to have 0 inputs and 0 results");
-    return signalPassFailure();
-  }
-
   // The first thing to define is the conversion target. This will define the
   // final target for this lowering.
   ConversionTarget target(getContext());
