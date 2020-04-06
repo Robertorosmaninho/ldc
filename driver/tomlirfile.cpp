@@ -104,16 +104,16 @@ void writeMLIRModule(Module *m, mlir::MLIRContext &mlirContext,
     //TODO:Needs to set a flag to lowering D->MLIR->Affine+std
     bool isLoweringToAffine = true;
     if(isLoweringToAffine){
-      pm.addPass(mlir::D::createLowerToStandardPass());
-      //mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
-      //optPM.addPass(mlir::createCanonicalizerPass());
-      //optPM.addPass(mlir::createCSEPass());
+      pm.addPass(mlir::D::createLowerToAffinePass());
+      mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
+      optPM.addPass(mlir::createCanonicalizerPass());
+      optPM.addPass(mlir::createCSEPass());
 
       //TODO: Needs to set a flag to enaple opt
-     // bool enableOpt = 1;
+    //  bool enableOpt = 1;
     //  if (enableOpt) {
     //    optPM.addPass(mlir::createLoopFusionPass());
-     //   optPM.addPass(mlir::createMemRefDataFlowOptPass());
+    //    optPM.addPass(mlir::createMemRefDataFlowOptPass());
     //  }
 
 

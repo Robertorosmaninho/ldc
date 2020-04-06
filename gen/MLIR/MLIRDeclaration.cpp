@@ -264,14 +264,14 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp){
   // tensor literal and build the operation.
   if(elementType.isInteger(size)) {
     auto dataAttributes = mlir::DenseElementsAttr::get(dataType, data);
-    return builder.create<mlir::ConstantOp>(Loc, dataAttributes.template
+    return builder.create<mlir::D::IntegerOp>(Loc, dataAttributes.template
                                                   cast<mlir::DenseIntElementsAttr>());
   } else if(isFloat){
     auto dataAttributes = mlir::DenseFPElementsAttr::get(dataType, dataF);
     if(elementType.isF64())
-      return builder.create<mlir::ConstantOp>(Loc, dataAttributes);
+      return builder.create<mlir::D::IntegerOp>(Loc, dataAttributes);
     else
-      return builder.create<mlir::ConstantOp>(Loc, dataAttributes);
+      return builder.create<mlir::D::IntegerOp>(Loc, dataAttributes);
   } else {
     _miss++;
     Logger::println("Unable to build ArrayLiteralExp: '%s'",

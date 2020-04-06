@@ -1,7 +1,10 @@
+//===-- LowerToAffineLoops.cpp --------------------------------------------===//
 //
-// Created by Roberto Rosmaninho on 18/12/19.
+//                         LDC – the LLVM D compiler
 //
-
+// This file is distributed under the BSD-style LDC license. See the LICENSE
+// file for details.
+//
 // =============================================================================
 //
 // This file implements a partial lowering of D operations to a combination of
@@ -22,8 +25,7 @@
 using namespace mlir;
 
 //===----------------------------------------------------------------------===//
-// DToAffine RewritePatterns - Licensed under the Apache License, Version
-// 2.0
+// DToAffine RewritePatterns
 //===----------------------------------------------------------------------===//
 
 /// Convert the given TensorType into the corresponding MemRefType.
@@ -41,8 +43,9 @@ static Value insertAllocAndDealloc(MemRefType type, Location loc,
   auto *parentBlock = alloc.getOperation()->getBlock();
   alloc.getOperation()->moveBefore(&parentBlock->front());
 
-  // Make sure to deallocate this alloc at the end of the block. This is fine
-  // as toy functions have no control flow.
+  // Make sure to deallocate this alloc at the end of the block.
+  // TODO: Analyze the impact of it in control flow
+  // This is fine as toy functions have no control flow.
   auto dealloc = rewriter.create<DeallocOp>(loc, alloc);
   dealloc.getOperation()->moveBefore(&parentBlock->back());
   return alloc;
@@ -131,41 +134,104 @@ namespace {
     }
   };
 
-  using AddOpLowering = BinaryOpLowering<AddIOp, AddIOp>;
-  using AddFOpLowering = BinaryOpLowering<AddFOp, AddFOp>;
-  using SubOpLowering = BinaryOpLowering<SubIOp, SubIOp>;
-  using SubFOpLowering = BinaryOpLowering<SubFOp, SubFOp>;
-  using MulOpLowering = BinaryOpLowering<MulIOp, MulIOp>;
-  using MulFOpLowering = BinaryOpLowering<MulFOp, MulFOp>;
-  using DivSOpLowering = BinaryOpLowering<SignedDivIOp, SignedDivIOp>;
-  using DivUOpLowering = BinaryOpLowering<UnsignedDivIOp, UnsignedDivIOp>;
-  using DivFOpLowering = BinaryOpLowering<DivFOp, DivFOp>;
-  using ModSOpLowering = BinaryOpLowering<SignedRemIOp, SignedRemIOp>;
-  using ModUOpLowering = BinaryOpLowering<UnsignedRemIOp, UnsignedRemIOp>;
-  using ModFOpLowering = BinaryOpLowering<RemFOp, RemFOp>;
-  using AndOpLowering = BinaryOpLowering<AndOp, AndOp>;
-  using OrOpLowering = BinaryOpLowering<OrOp, OrOp>;
-  using XorUOpLowering = BinaryOpLowering<XOrOp, XOrOp>;
+  using AddOpLowering = BinaryOpLowering<D::AddOp, AddIOp>;
+  using AddFOpLowering = BinaryOpLowering<D::AddFOp, AddFOp>;
+  using SubOpLowering = BinaryOpLowering<D::SubOp, SubIOp>;
+  using SubFOpLowering = BinaryOpLowering<D::SubFOp, SubFOp>;
+  using MulOpLowering = BinaryOpLowering<D::MulOp, MulIOp>;
+  using MulFOpLowering = BinaryOpLowering<D::MulFOp, MulFOp>;
+  using DivSOpLowering = BinaryOpLowering<D::DivSOp, SignedDivIOp>;
+  using DivUOpLowering = BinaryOpLowering<D::DivUOp, UnsignedDivIOp>;
+  using DivFOpLowering = BinaryOpLowering<D::DivFOp, DivFOp>;
+  using ModSOpLowering = BinaryOpLowering<D::ModSOp, SignedRemIOp>;
+  using ModUOpLowering = BinaryOpLowering<D::ModUOp, UnsignedRemIOp>;
+  using ModFOpLowering = BinaryOpLowering<D::ModFOp, RemFOp>;
+  using AndOpLowering = BinaryOpLowering<D::AndOp, AndOp>;
+  using OrOpLowering = BinaryOpLowering<D::OrOp, OrOp>;
+  using XorUOpLowering = BinaryOpLowering<D::XorOp, XOrOp>;
 }
 
 //===----------------------------------------------------------------------===//
-// ToyToAffineLoweringPass
+// DToAffine RewritePatterns: Integer operations
+//===----------------------------------------------------------------------===//
+
+struct ConstantOpLowering : public OpRewritePattern<D::IntegerOp> {
+  using OpRewritePattern<D::IntegerOp>::OpRewritePattern;
+
+  PatternMatchResult matchAndRewrite(D::IntegerOp op,
+                                     PatternRewriter &rewriter) const final {
+    Attribute value = op.value();
+    Location loc = op.getLoc();
+    DenseElementsAttr constantValue = value.cast<DenseElementsAttr>();
+
+    // When lowering the constant operation, we allocate and assign the constant
+    // values to a corresponding memref allocation.
+    auto tensorType = op.getType().cast<TensorType>();
+    auto memRefType = convertTensorToMemRef(tensorType);
+    auto alloc = insertAllocAndDealloc(memRefType, loc, rewriter);
+
+    // We will be generating constant indices up-to the largest dimension.
+    // Create these constants up-front to avoid large amounts of redundant
+    // operations.
+    auto valueShape = memRefType.getShape();
+    SmallVector<Value, 8> constantIndices;
+    for (auto i : llvm::seq<int64_t>(
+        0, *std::max_element(valueShape.begin(), valueShape.end())))
+      constantIndices.push_back(rewriter.create<ConstantIndexOp>(loc, i));
+
+    // The constant operation represents a multi-dimensional constant, so we
+    // will need to generate a store for each of the elements. The following
+    // functor recursively walks the dimensions of the constant shape,
+    // generating a store when the recursion hits the base case.
+    SmallVector<Value, 2> indices;
+    auto valueIt = constantValue.getValues<IntegerAttr>().begin();
+    std::function<void(uint64_t)> storeElements = [&](uint64_t dimension) {
+      // The last dimension is the base case of the recursion, at this point
+      // we store the element at the given index.
+      if (dimension == valueShape.size()) {
+        rewriter.create<AffineStoreOp>(
+            loc, rewriter.create<ConstantOp>(loc, *valueIt++), alloc,
+            llvm::makeArrayRef(indices));
+        return;
+      }
+
+      // Otherwise, iterate over the current dimension and add the indices to
+      // the list.
+      for (uint64_t i = 0, e = valueShape[dimension]; i != e; ++i) {
+        indices.push_back(constantIndices[i]);
+        storeElements(dimension + 1);
+        indices.pop_back();
+      }
+    };
+
+    // Start the element storing recursion from the first dimension.
+    storeElements(/*dimension=*/0);
+
+    // Replace this operation with the generated alloc.
+    rewriter.replaceOp(op, alloc);
+    return matchSuccess();
+  }
+};
+
+
+//===----------------------------------------------------------------------===//
+// DToAffineLoweringPass
 //===----------------------------------------------------------------------===//
 
 /// This is a partial lowering to affine loops of the D operations that are
 /// computationally intensive (like matmul for example...) while keeping the
 /// rest of the code in the D dialect.
 namespace {
-  struct DToStandardLoweringPass : public FunctionPass<DToStandardLoweringPass> {
+  struct DToAffineLoweringPass : public FunctionPass<DToAffineLoweringPass> {
     void runOnFunction() final;
   };
 } // end anonymous namespace.
 
-void DToStandardLoweringPass::runOnFunction() {
+void DToAffineLoweringPass::runOnFunction() {
   auto function = getFunction();
 
-  // We only lower the main function as we expect that all other functions have
-  // been inlined.
+  // We only lower the main for now function as we expect that all other
+  // functions have been inlined.
   if (function.getName() != "_Dmain")
     return;
 
@@ -175,20 +241,20 @@ void DToStandardLoweringPass::runOnFunction() {
 
   // We define the specific operations, or dialects, that are legal targets for
   // this lowering. In our case, we are lowering to `Standard` dialect.
-  target.addLegalDialect<StandardOpsDialect>();
+  target.addLegalDialect<mlir::AffineOpsDialect, mlir::StandardOpsDialect>();
 
   // We also define the Toy dialect as Illegal so that the conversion will fail
   // if any of these operations are *not* converted. If we actually want
   // a partial lowering, we explicitly mark the operations that don't want
   // to lower as `legal`.
 
- // target.addIllegalDialect<D::DDialect>();
+  target.addIllegalDialect<D::DDialect>();
   target.addLegalOp<D::CastOp>();
 
   // Now that the conversion target has been defined, we just need to provide
   // the set of patterns that will lower the Toy operations.
   OwningRewritePatternList patterns;
-  patterns.insert<AddOpLowering, AddFOpLowering,
+  patterns.insert<ConstantOpLowering, AddOpLowering, AddFOpLowering,
   SubOpLowering, SubFOpLowering, MulOpLowering, MulFOpLowering,
   DivSOpLowering, DivUOpLowering, DivFOpLowering, ModSOpLowering,
   ModUOpLowering, ModFOpLowering, AndOpLowering, OrOpLowering,
@@ -203,8 +269,8 @@ void DToStandardLoweringPass::runOnFunction() {
 
 /// Create a pass for lowering operations in the `Affine` and `Std` dialects,
 /// for a subset of the D IR (e.g. matmul).
-std::unique_ptr<Pass> mlir::D::createLowerToStandardPass() {
-  return std::make_unique<DToStandardLoweringPass>();
+std::unique_ptr<Pass> mlir::D::createLowerToAffinePass() {
+  return std::make_unique<DToAffineLoweringPass>();
 }
 
 #endif

@@ -19,9 +19,8 @@ namespace mlir{
   namespace D{
     /// Create a pass for lowering to operations in the `Affine` and `Std`
     /// dialects, for a subset of the D IR (e.g. matmul).
-    std::unique_ptr<mlir::Pass> createLowerToStandardPass();
+    std::unique_ptr<mlir::Pass> createLowerToAffinePass();
   } // end namespace D
 } // end namespace mlir
 
-
-#endif //LDC_PASSES_H
+#endif //LDC_PASSE
