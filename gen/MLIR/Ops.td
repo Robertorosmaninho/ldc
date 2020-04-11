@@ -43,8 +43,8 @@ def AddOp : D_Op<"add"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins AnyAttr:$lhs, AnyAttr:$rhs);
+    let results = (outs AnyType);
 
     // Allow building an AddOp with from the two input operands.
     let builders = [
@@ -363,12 +363,100 @@ def IntegerOp : D_Op<"int", [NoSideEffect]> {
     OpBuilder<"Builder *builder, OperationState &state, "
               "Type type, int value, int size">,
 
-    // Build a integer with a given value.
-    OpBuilder<"Builder *builder, OperationState &state, "
-              "DenseElementsAttr value", [{
-                build(builder, state, value.getType(), value);
-                }]>,
+    OpBuilder<
+        "Builder *builder, OperationState &result, Attribute value",
+        [{ build(builder, result, value.getType(), value); }]>
   ];
+}
+
+def IntegerArrayOp : D_Op<"array_int", [NoSideEffect]> {
+    let summary = "Array Integer Declaration";
+    let description = [{
+        IntegerArrayOp operation turns a literal into an SSA value. The data is
+        attached to the operation as an attribute. For example:
+
+        ```mlir
+          %0 = "D.array_int"() {value = dense<[1, 2, 3, 4, 5]> : tensor<5xi32>}
+          : () -> tensor<5xi32>
+        ```
+        This operation is needed due to the difference of matchAndRewrite
+        method to translate operations to Affine Dialect. IntegerOp is
+        translated from IntegerAttr and IntegerArrayOp from DenseElementsAttr.
+      }];
+
+    // The IntegerOp operation takes an attribute as the only input.
+    let arguments = (ins AnyAttr:$value);
+
+    // The constant operation returns a single value of TensorType.
+    let results = (outs AnyType);
+
+    let builders = [
+        // Build a integer with a given value.
+        OpBuilder<"Builder *builder, OperationState &state, "
+                  "DenseElementsAttr value", [{
+                    build(builder, state, value.getType(), value);
+                    }]>
+    ];
+}
+
+def FloatArrayOp : D_Op<"array_float", [NoSideEffect]> {
+    let summary = "Array Float Declaration";
+    let description = [{
+        FloatArrayOp operation turns a literal into an SSA value. The data is
+        attached to the operation as an attribute. For example:
+
+        ```mlir
+          %0 = "D.array_float"() {value = dense<[5.900000e+00, 2.600000e+00, 1.400000e+00, 1.040000e+01]> : tensor<4xf32>}
+          : () -> tensor<5xi32>
+        ```
+        This operation is needed due to the difference of matchAndRewrite
+        method to translate operations to Affine Dialect. FloatOp is
+        translated from FloatAttr and FloatArrayOp from DenseElementsAttr.
+      }];
+
+    // The IntegerOp operation takes an attribute as the only input.
+    let arguments = (ins AnyAttr:$value);
+
+    // The constant operation returns a single value of TensorType.
+    let results = (outs AnyType);
+
+    let builders = [
+        // Build a integer with a given value.
+        OpBuilder<"Builder *builder, OperationState &state, "
+                  "DenseElementsAttr value", [{
+                    build(builder, state, value.getType(), value);
+                    }]>
+    ];
+}
+
+def DoubleArrayOp : D_Op<"array_double", [NoSideEffect]> {
+    let summary = "Array Double Declaration";
+    let description = [{
+        DoubleArrayOp operation turns a literal into an SSA value. The data is
+        attached to the operation as an attribute. For example:
+
+        ```mlir
+          %0 = "D.array_float"() {value = dense<[4.760000e+00, 3.400000e+01, 2.436000e+02, 9.189080e+02]> : tensor<4xf64>}
+          : () -> tensor<5xi32>
+        ```
+        This operation is needed due to the difference of matchAndRewrite
+        method to translate operations to Affine Dialect. DoubleOp is
+        translated from FloatAttr and DoubleArrayOp from DenseElementsAttr.
+      }];
+
+    // The IntegerOp operation takes an attribute as the only input.
+    let arguments = (ins AnyAttr:$value);
+
+    // The constant operation returns a single value of TensorType.
+    let results = (outs AnyType);
+
+    let builders = [
+        // Build a integer with a given value.
+        OpBuilder<"Builder *builder, OperationState &state, "
+                  "DenseElementsAttr value", [{
+                    build(builder, state, value.getType(), value);
+                    }]>
+    ];
 }
 
 def FloatOp : D_Op<"float", [NoSideEffect]> {
@@ -387,7 +475,7 @@ def FloatOp : D_Op<"float", [NoSideEffect]> {
   let arguments = (ins AnyAttr:$value);
 
   // The constant operation returns a single value of TensorType.
-  let results = (outs FloatLike);
+  let results = (outs AnyType);
 
   // Add custom build methods for the FloatOp operation. These method
   // populates the `state` that MLIR uses to create operations, i.e. these are
@@ -398,10 +486,9 @@ def FloatOp : D_Op<"float", [NoSideEffect]> {
               "Type type, float value">,
 
     // Build a float with a given value.
-    OpBuilder<"Builder *builder, OperationState &state, "
-              "DenseElementsAttr value", [{
-                build(builder, state, value.getType(), value);
-                }]>,
+    OpBuilder<
+         "Builder *builder, OperationState &result, Attribute value",
+         [{ build(builder, result, value.getType(), value); }]>
   ];
 }
 
@@ -417,10 +504,10 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
   }];
 
   // The DoubleOp operation takes an attribute as the only input.
-  let arguments = (ins F64ElementsAttr:$value);
+  let arguments = (ins AnyAttr:$value);
 
   // The constant operation returns a single value of TensorType.
-  let results = (outs F64Tensor);
+  let results = (outs AnyType);
 
   // Add custom build methods for the DoubleOp operation. These method
   // populates the `state` that MLIR uses to create operations, i.e. these are
@@ -431,10 +518,9 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
               "Type type, double value">,
 
     // Build a double with a given value.
-    OpBuilder<"Builder *builder, OperationState &state, "
-              "DenseElementsAttr value", [{
-                build(builder, state, value.getType(), value);
-                }]>
+    OpBuilder<
+            "Builder *builder, OperationState &result, Attribute value",
+            [{ build(builder, result, value.getType(), value); }]>
   ];
 }
 

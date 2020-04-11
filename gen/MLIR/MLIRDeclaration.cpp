@@ -79,16 +79,6 @@ mlir::Value MLIRDeclaration::mlirGen(VarDeclaration *vd){
   return nullptr;
 }
 
-mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(mlir::Value value) {
-  // The type of this attribute is tensor of 64-bit floating-point with no
-  // shape.
-  auto dataType = mlir::RankedTensorType::get({}, value.getType());
-
-  // This is the actual attribute that holds the list of values for this
-  // tensor literal.
-  return mlir::DenseElementsAttr::get(dataType, &value);
-}
-
 mlir::Value MLIRDeclaration::DtoAssignMLIR(mlir::Location Loc,
             mlir::Value lhs, mlir::Value rhs,  StringRef lhs_name,
              StringRef rhs_name, int op, bool canSkipPostblit, Type* t1,
@@ -142,12 +132,12 @@ mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp, AddAssignExp *addAssignExp)
 
   if((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64())
      && (e1.getType() == e2.getType())) {
-    result = builder.create<mlir::AddFOp>(*location, e1,e2).getResult();
+    result = builder.create<mlir::D::AddFOp>(*location, e1,e2).getResult();
   }else
   if((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
       (e1.getType() == e2.getType())) {
-    result = builder.create<mlir::AddIOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::AddOp>(*location, e1, e2).getResult();
   }else {
     _miss++;
     return nullptr;
@@ -188,7 +178,7 @@ mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp, AndAssignExp *andAssignExp)
       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
-    result = builder.create<mlir::AndOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::AndOp>(*location, e1, e2).getResult();
   }else {
     _miss++;
     return nullptr;
@@ -210,7 +200,6 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp){
   // shape .
   mlir::Type elementType = get_MLIRtype(arrayLiteralExp->elements->front());
   bool isFloat = elementType.isF16() || elementType.isF32() || elementType.isF64();
-  Logger::println("@@@@@@@@@@@@@@@@@@@@@@@@ pegou o tipo!");
 
   int size = 0;
   if(elementType.isInteger(1))
@@ -264,14 +253,14 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp){
   // tensor literal and build the operation.
   if(elementType.isInteger(size)) {
     auto dataAttributes = mlir::DenseElementsAttr::get(dataType, data);
-    return builder.create<mlir::D::IntegerOp>(Loc, dataAttributes.template
+    return builder.create<mlir::D::IntegerArrayOp>(Loc, dataAttributes.template
                                                   cast<mlir::DenseIntElementsAttr>());
   } else if(isFloat){
-    auto dataAttributes = mlir::DenseFPElementsAttr::get(dataType, dataF);
+    auto dataAttributes = mlir::DenseElementsAttr::get(dataType, dataF);
     if(elementType.isF64())
-      return builder.create<mlir::D::IntegerOp>(Loc, dataAttributes);
+      return builder.create<mlir::D::DoubleArrayOp>(Loc, dataAttributes);
     else
-      return builder.create<mlir::D::IntegerOp>(Loc, dataAttributes);
+      return builder.create<mlir::D::FloatArrayOp>(Loc, dataAttributes);
   } else {
     _miss++;
     Logger::println("Unable to build ArrayLiteralExp: '%s'",
@@ -390,8 +379,8 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp){
     types.push_back(mlir::NoneType::get(&context));
 
   llvm::ArrayRef<mlir::Type> ret_type(types);
-  return builder.create<mlir::CallOp>(loc(callExp->loc), functionName,
-      ret_type, operands).getResult(0);
+  return builder.create<mlir::D::CallOp>(loc(callExp->loc), functionName,
+      ret_type, operands);
 }
 
 bool SizeIsGreaterThan(mlir::Type a, mlir::Type b){
@@ -401,12 +390,8 @@ bool SizeIsGreaterThan(mlir::Type a, mlir::Type b){
     return true;
   else if ((a.isInteger(1) || a.isInteger(8)) && b.isInteger(16))
     return true;
-  else if (a.isInteger(1) && b.isInteger(8))
-    return true;
-  else
-    return false;
+  else return a.isInteger(1) && b.isInteger(8);
 }
-
 
 mlir::Value MLIRDeclaration::mlirGen(CastExp *castExp){
   IF_LOG Logger::print("MLIRCodeGen - CastExp: %s @ %s\n", castExp->toChars(),
@@ -532,16 +517,16 @@ mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp, DivAssignExp *divAssignExp)
 
   if((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
      (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
-    result = builder.create<mlir::DivFOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::DivFOp>(*location, e1, e2).getResult();
   }else
   if((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
     if(isSigned)
-      result = builder.create<mlir::SignedDivIOp>(*location, e1, e2).getResult();
+      result = builder.create<mlir::D::DivSOp>(*location, e1, e2).getResult();
     else
-      result = builder.create<mlir::UnsignedDivIOp>(*location, e1, e2).getResult();
+      result = builder.create<mlir::D::DivUOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
     return nullptr;
@@ -624,7 +609,8 @@ mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp){
     location = builder.getUnknownLoc();
   else
     location = loc(integerExp->loc);
-    return builder.create<mlir::ConstantOp>(location, builder.getIntegerAttr(type, dint));
+  return builder.create<mlir::D::IntegerOp>(location,
+                                      builder.getIntegerAttr(type, dint));
 }
 
 mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp, MinAssignExp *minAssignExp) {
@@ -657,13 +643,13 @@ mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp, MinAssignExp *minAssignExp)
 
   if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
       (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
-    result = builder.create<mlir::SubFOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::SubFOp>(*location, e1, e2).getResult();
   } else
   if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
-    result = builder.create<mlir::SubIOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::SubOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
     return nullptr;
@@ -708,16 +694,16 @@ mlir::Value MLIRDeclaration::mlirGen(ModExp *modExp, ModAssignExp *modAssignExp)
 
   if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
       (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
-    result = builder.create<mlir::RemFOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::ModFOp>(*location, e1, e2).getResult();
   }else
   if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
        e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
       (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
        e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
     if (isSigned)
-      result = builder.create<mlir::SignedRemIOp>(*location, e1, e2).getResult();
+      result = builder.create<mlir::D::ModSOp>(*location, e1, e2).getResult();
     else
-      result = builder.create<mlir::UnsignedRemIOp>(*location, e1, e2).getResult();
+      result = builder.create<mlir::D::ModUOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
     return nullptr;
@@ -756,13 +742,13 @@ mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp, MulAssignExp *mulAssignExp)
 
   if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
      (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
-    result = builder.create<mlir::MulFOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::MulFOp>(*location, e1, e2).getResult();
   } else
   if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
        e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
       (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
        e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
-    result = builder.create<mlir::MulIOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::MulOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
     return nullptr;
@@ -803,7 +789,7 @@ mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp){
        e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
       (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
        e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
-    result = builder.create<mlir::OrOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::OrOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
     return nullptr;
@@ -825,43 +811,30 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp){
     return nullptr;
   }
 
-  int size = 0;
-  if (e1.getType().isInteger(1))
-    size = 1;
-  else if(e1.getType().isInteger(8))
-    size = 8;
-  else if(e1.getType().isInteger(16))
-    size = 16;
-  else if(e1.getType().isInteger(32))
-    size = 32;
-  else if(e1.getType().isInteger(64))
-    size = 64;
-  else
-  IF_LOG Logger::println("MLIR doesn't support integer of type different "
+  if (e1.getType().isInteger(128))
+    IF_LOG Logger::println("MLIR doesn't support integer of type different "
                          "from 1,8,16,32,64");
-
- mlir::Value e2 = nullptr;
+  mlir::Value e2 = nullptr;
   mlir::Location location = loc(postExp->loc);
-  if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
-    e2 = builder.create<mlir::ConstantOp>(location,
-                                          builder.getFloatAttr(e1.getType(), 1.00));
-  else if (e1.getType().isInteger(size))
-    e2 = builder.create<mlir::ConstantOp>(location,
-                                          builder.getIntegerAttr(e1.getType(), 1));
+  if (e1.getType().isF32() || e1.getType().isF16())
+    e2 = builder.create<mlir::D::FloatOp>(location, e1.getType(), 1);
+  else if (e1.getType().isF64())
+    e2 = builder.create<mlir::D::DoubleOp>(location, e1.getType(), 1);
+  else
+    e2 = builder.create<mlir::D::IntegerOp>(location, builder.getIntegerAttr(e1.getType(), 1));
+
   if (postExp->op == TOKplusplus) {
     if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
-      return builder.create<mlir::AddFOp>(location, e1, e2);
-    else if (e1.getType().isInteger(size))
+      return builder.create<mlir::D::AddFOp>(location, e1, e2);
+    else
       return builder.create<mlir::AddIOp>(location, e1, e2);
   } else if (postExp->op == TOKminusminus) {
     if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
-      return builder.create<mlir::SubFOp>(location, e1, e2);
-    else if (e1.getType().isInteger(size))
-      return builder.create<mlir::SubIOp>(location, e1, e2);
-  } else {
-    _miss++;
-    return nullptr;
+      return builder.create<mlir::D::SubFOp>(location, e1, e2);
+    else
+      return builder.create<mlir::D::SubOp>(location, e1, e2);
   }
+  _miss++;
   return nullptr;
 }
 
@@ -871,8 +844,10 @@ mlir::Value MLIRDeclaration::mlirGen(RealExp *realExp){
   IF_LOG Logger::println("MLIRCodeGen - RealExp: '%Lf'", dfloat);
   mlir::Location Loc = loc(realExp->loc);
   auto type = get_MLIRtype(realExp);
-  return builder.create<mlir::ConstantOp>(Loc, builder.getFloatAttr(type,
-                                                                       dfloat));
+  if(type.isF64())
+    return builder.create<mlir::D::DoubleOp>(Loc, type, dfloat);
+  else
+    return builder.create<mlir::D::FloatOp>(Loc, type, dfloat);
 }
 
 mlir::Value MLIRDeclaration::mlirGen(StringExp *stringExp){
@@ -893,8 +868,8 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp){
   auto var = symbolTable.lookup(varExp->var->toChars());
   if (!var) {
     IF_LOG Logger::println("Undeclared VarExp: '%s' | '%u'", varExp->toChars(), varExp->op);
-    auto type = builder.getIntegerType(32);
-    return builder.create<mlir::ConstantOp>(loc(varExp->loc),builder.getIntegerAttr(type, 0));
+    auto dataAttribute = builder.getIntegerAttr(builder.getIntegerType(32), 0);
+    return builder.create<mlir::D::IntegerOp>(loc(varExp->loc), dataAttribute);
   }
   return var;
 }
@@ -931,7 +906,7 @@ mlir::Value MLIRDeclaration::mlirGen(XorExp *xorExp, XorAssignExp *xorAssignExp)
        e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
       (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
        e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
-    result = builder.create<mlir::XOrOp>(*location, e1, e2).getResult();
+    result = builder.create<mlir::D::XorOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
     return nullptr;

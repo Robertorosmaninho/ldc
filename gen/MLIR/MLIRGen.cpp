@@ -25,6 +25,7 @@
 #include "gen/MLIR/MLIRStatements.h"
 
 #include "mlir/Analysis/Verifier.h"
+#include "mlir/Dialect/AffineOps/AffineOps.h"
 #include "mlir/Dialect/StandardOps/Ops.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Function.h"
@@ -138,11 +139,6 @@ private:
   /// scope is destroyed and the mappings created in this scope are dropped.
   llvm::ScopedHashTable<StringRef, mlir::Value> symbolTable;
 
-  /// A mapping for named struct types to the underlying MLIR type and the
-  /// original AST node.
-  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> structMap;
-
-
   /// This flags counts the number of hits and misses of our translation.
   unsigned total = 0, miss = 0;
 
@@ -166,8 +162,21 @@ private:
 
     //Assuming that the function will only return one value from it's type
     llvm::SmallVector<mlir::Type, 4> ret_types;
-    if(!Fd->returns->empty())
-      ret_types.push_back(get_MLIRtype(nullptr, Fd->returns->front()->exp->type));
+
+    if (!Fd->returns->empty()) {
+      auto type = get_MLIRtype(nullptr, Fd->type);
+      TypeFunction* funcType = static_cast<TypeFunction*>(Fd->type);
+      auto ty = funcType->next->ty;
+      if (ty != Tvector && ty != Tarray && ty != Tsarray && ty != Taarray){
+        auto memRefType = mlir::MemRefType::get(1, type);
+        ret_types.push_back(memRefType);
+      } else {
+        auto tensorType = type.cast<mlir::TensorType>();
+        auto memRefType = mlir::MemRefType::get(tensorType.getShape(),
+                                                tensorType.getElementType());
+        ret_types.push_back(memRefType);
+      }
+    }
 
     //Supposing that the type is integer
     unsigned long size = 0;
@@ -281,15 +290,25 @@ private:
       return builder.getF64Type();
     } else if (basetype->ty == Tfloat80) {
       miss++;     //TODO: Build F80 type on DDialect
-    } else if (basetype->ty == Tvector) {
-      mlir::TensorType tensor;
+    } else if (basetype->ty == Tvector || basetype->ty == Tarray ||
+               basetype->ty == Taarray) {
+      mlir::UnrankedTensorType tensor;
       return tensor;
+    } else if (basetype->ty == Tsarray) {
+      auto size = basetype->isTypeSArray()->dim->toInteger();
+      return mlir::RankedTensorType::get(size,
+                                         get_MLIRtype(nullptr,
+                                             type->isTypeSArray()->next));
+
+    } else if (basetype->ty == Tfunction) {
+      TypeFunction* typeFunction = static_cast<TypeFunction*>(basetype);
+      return get_MLIRtype(nullptr, typeFunction->next);
     } else {
-      miss++;
-      MLIRDeclaration declaration(irs, nullptr, context, builder,
-                               symbolTable, total, miss);
-      mlir::Value value = declaration.mlirGen(varDeclarations->front());
-      return value.getType();
+        miss++;
+        MLIRDeclaration declaration(irs, nullptr, context, builder,
+            symbolTable, total, miss);
+        mlir::Value value = declaration.mlirGen(varDeclarations->front());
+        return value.getType();
     }
 
     miss++;
