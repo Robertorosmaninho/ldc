@@ -193,7 +193,9 @@ void D::IntegerOp::build(mlir::Builder *builder, mlir::OperationState &state,
                       mlir::Type type, int value, int size = 0) {
   if(type.isInteger(size)){
     auto dataType = builder->getIntegerType(size);
-    IntegerOp::build(builder, state, builder->getIntegerAttr(dataType, value));
+    auto shapedType = mlir::RankedTensorType::get({}, dataType);
+    auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, value);
+    IntegerOp::build(builder, state, dataAttribute);
   }else{
     IF_LOG Logger::println("Unable to get the Attribute for %d", value);
   }
@@ -202,9 +204,13 @@ void D::IntegerOp::build(mlir::Builder *builder, mlir::OperationState &state,
 void D::FloatOp::build(mlir::Builder *builder, mlir::OperationState &state,
                     mlir::Type type, float value) {
   if(type.isF16()){
-    FloatOp::build(builder, state, builder->getFloatAttr(type, value));
+    auto shapedType = mlir::RankedTensorType::get({}, builder->getF16Type());
+    auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, value);
+    FloatOp::build(builder, state, dataAttribute);
   }else if(type.isF32()){
-    FloatOp::build(builder, state, builder->getFloatAttr(type, value));
+    auto shapedType = mlir::RankedTensorType::get(1, builder->getF32Type());
+    auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, value);
+    FloatOp::build(builder, state, dataAttribute);
   }else{
     IF_LOG Logger::println("Unable to get the Attribute for %f", value);
   }
@@ -213,8 +219,9 @@ void D::FloatOp::build(mlir::Builder *builder, mlir::OperationState &state,
 void D::DoubleOp::build(mlir::Builder *builder, mlir::OperationState &state,
                      mlir::Type type, double value) {
   if(type.isF64()){
-    auto dataType = builder->getF64Type();
-    FloatOp::build(builder, state, builder->getFloatAttr(dataType, value));
+    auto shapedType = mlir::RankedTensorType::get(1, builder->getF64Type());
+    auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, value);
+    FloatOp::build(builder, state, dataAttribute);
   }else{
     IF_LOG Logger::println("Unable to get the Attribute for %f", value);
   }

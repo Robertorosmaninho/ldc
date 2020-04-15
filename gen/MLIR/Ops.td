@@ -14,6 +14,10 @@
 #define D_OPS
 
 include "mlir/IR/OpBase.td"
+include "mlir/IR/OpAsmInterface.td"
+//include "mlir/Interfaces/CallInterfaces.td"
+//include "mlir/Interfaces/ControlFlowInterfaces.td"
+//include "mlir/Interfaces/SideEffects.td"
 
 // Provide a definition of the 'D' dialect in the ODS framework so that we
 // can define our operations.
@@ -33,9 +37,46 @@ class D_Op<string mnemonic, list<OpTrait> traits = []> :
 ////////////////////////////////////////////////////////////////////////////////
 // Binary Operations
 ////////////////////////////////////////////////////////////////////////////////
-// AddOp IntegerLike infers the size of int
 
-def AddOp : D_Op<"add"> {
+// Base class for standard arithmetic operations.  Requires operands and
+// results to be of the same type, but does not constrain them to specific
+// types.  Individual classes will have `lhs` and `rhs` accessor to operands.
+class ArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
+    Op<D_Dialect, mnemonic,
+       !listconcat(traits, [NoSideEffect, SameOperandsAndResultType])> {
+
+  let results = (outs AnyType);
+
+}
+
+// Base class for standard arithmetic operations on integers, vectors and
+// tensors thereof.  This operation takes two operands and returns one result,
+// each of these is required to be of the same type.  This type may be an
+// integer scalar type, a vector whose element type is an integer type, or an
+// integer tensor.  The custom assembly form of the operation is as follows
+//
+//     <op>i %0, %1 : i32
+class IntArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
+    ArithmeticOp<mnemonic, traits>,
+    Arguments<(ins AnyType:$lhs, AnyType:$rhs)>;
+
+// Base class for standard arithmetic binary operations on floats, vectors and
+// tensors thereof.  This operation has two operands and returns one result,
+// each of these is required to be of the same type.  This type may be a
+// floating point scalar type, a vector whose element type is a floating point
+// type, or a floating point tensor.  The custom assembly form of the operation
+// is as follows
+//
+//     <op>f %0, %1 : f32
+class FloatArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
+    ArithmeticOp<mnemonic, traits>,
+    Arguments<(ins FloatLike:$lhs, FloatLike:$rhs)>;
+
+//===----------------------------------------------------------------------===//
+// AddOp
+//===----------------------------------------------------------------------===//
+
+def AddOp : IntArithmeticOp<"add", [Commutative]> {
     let summary = "element-wise addition operation";
     let description = [{
         The "add" operation performs element-wise addition between two
@@ -43,31 +84,32 @@ def AddOp : D_Op<"add"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins AnyAttr:$lhs, AnyAttr:$rhs);
-    let results = (outs AnyType);
+   // let arguments = (ins AnyAttr:$lhs, AnyAttr:$rhs);
+   // let results = (outs AnyType);
 
     // Allow building an AddOp with from the two input operands.
-    let builders = [
-      OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
-    ];
+  //  let builders = [
+  //    OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+  //  ];
+
 }
 
 // AddFOp FloatLike infers the size of float
 
-def AddFOp : D_Op<"fadd"> {
+def AddFOp : FloatArithmeticOp<"fadd"> {
     let summary = "element-wise addition operation";
     let description = [{
         The "addf" operation performs element-wise addition between two values.
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins FloatLike:$lhs, FloatLike:$rhs);
-    let results = (outs FloatLike);
+  //  let arguments = (ins AnyAttr:$lhs, AnyAttr:$rhs);
+  //  let results = (outs FloatLike);
 
     // Allow building an AddOp with from the two input operands.
-    let builders = [
-      OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
-    ];
+ //   let builders = [
+ //     OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+  //  ];
 }
 
 // SubOp IntegerLike infers the size of int
@@ -369,95 +411,6 @@ def IntegerOp : D_Op<"int", [NoSideEffect]> {
   ];
 }
 
-def IntegerArrayOp : D_Op<"array_int", [NoSideEffect]> {
-    let summary = "Array Integer Declaration";
-    let description = [{
-        IntegerArrayOp operation turns a literal into an SSA value. The data is
-        attached to the operation as an attribute. For example:
-
-        ```mlir
-          %0 = "D.array_int"() {value = dense<[1, 2, 3, 4, 5]> : tensor<5xi32>}
-          : () -> tensor<5xi32>
-        ```
-        This operation is needed due to the difference of matchAndRewrite
-        method to translate operations to Affine Dialect. IntegerOp is
-        translated from IntegerAttr and IntegerArrayOp from DenseElementsAttr.
-      }];
-
-    // The IntegerOp operation takes an attribute as the only input.
-    let arguments = (ins AnyAttr:$value);
-
-    // The constant operation returns a single value of TensorType.
-    let results = (outs AnyType);
-
-    let builders = [
-        // Build a integer with a given value.
-        OpBuilder<"Builder *builder, OperationState &state, "
-                  "DenseElementsAttr value", [{
-                    build(builder, state, value.getType(), value);
-                    }]>
-    ];
-}
-
-def FloatArrayOp : D_Op<"array_float", [NoSideEffect]> {
-    let summary = "Array Float Declaration";
-    let description = [{
-        FloatArrayOp operation turns a literal into an SSA value. The data is
-        attached to the operation as an attribute. For example:
-
-        ```mlir
-          %0 = "D.array_float"() {value = dense<[5.900000e+00, 2.600000e+00, 1.400000e+00, 1.040000e+01]> : tensor<4xf32>}
-          : () -> tensor<5xi32>
-        ```
-        This operation is needed due to the difference of matchAndRewrite
-        method to translate operations to Affine Dialect. FloatOp is
-        translated from FloatAttr and FloatArrayOp from DenseElementsAttr.
-      }];
-
-    // The IntegerOp operation takes an attribute as the only input.
-    let arguments = (ins AnyAttr:$value);
-
-    // The constant operation returns a single value of TensorType.
-    let results = (outs AnyType);
-
-    let builders = [
-        // Build a integer with a given value.
-        OpBuilder<"Builder *builder, OperationState &state, "
-                  "DenseElementsAttr value", [{
-                    build(builder, state, value.getType(), value);
-                    }]>
-    ];
-}
-
-def DoubleArrayOp : D_Op<"array_double", [NoSideEffect]> {
-    let summary = "Array Double Declaration";
-    let description = [{
-        DoubleArrayOp operation turns a literal into an SSA value. The data is
-        attached to the operation as an attribute. For example:
-
-        ```mlir
-          %0 = "D.array_float"() {value = dense<[4.760000e+00, 3.400000e+01, 2.436000e+02, 9.189080e+02]> : tensor<4xf64>}
-          : () -> tensor<5xi32>
-        ```
-        This operation is needed due to the difference of matchAndRewrite
-        method to translate operations to Affine Dialect. DoubleOp is
-        translated from FloatAttr and DoubleArrayOp from DenseElementsAttr.
-      }];
-
-    // The IntegerOp operation takes an attribute as the only input.
-    let arguments = (ins AnyAttr:$value);
-
-    // The constant operation returns a single value of TensorType.
-    let results = (outs AnyType);
-
-    let builders = [
-        // Build a integer with a given value.
-        OpBuilder<"Builder *builder, OperationState &state, "
-                  "DenseElementsAttr value", [{
-                    build(builder, state, value.getType(), value);
-                    }]>
-    ];
-}
 
 def FloatOp : D_Op<"float", [NoSideEffect]> {
   let summary = "Float Declaration";
@@ -540,6 +493,10 @@ def CastOp : D_Op<"cast"> {
   let arguments = (ins AnyTypeOf<[AnyType, AnyMemRef]>:$input);
   let results = (outs AnyType:$output);
 
-  // Set the folder bit so that we can fold redundant cast operations.
- // let hasFolder = 1;
+  let builders = [OpBuilder<
+    "Builder *builder, OperationState &result, Value value, Type destType", [{
+      result.addOperands(value);
+      result.addTypes(destType);
+  }]>];
+
 }

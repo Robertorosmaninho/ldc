@@ -129,14 +129,13 @@ mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp, AddAssignExp *addAssignExp)
     _miss++;
     return nullptr;
   }
-
-  if((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64())
-     && (e1.getType() == e2.getType())) {
+  auto tensor = e1.getType().cast<mlir::TensorType>();
+  auto type = tensor.getElementType();
+  if (type.isF16() || type.isF32() || type.isF64()) {
     result = builder.create<mlir::D::AddFOp>(*location, e1,e2).getResult();
-  }else
-  if((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
-      e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
-      (e1.getType() == e2.getType())) {
+  } else
+  if (type.isInteger(8) || type.isInteger(16) || type.isInteger(32) ||
+      type.isInteger(64)) {
     result = builder.create<mlir::D::AddOp>(*location, e1, e2).getResult();
   }else {
     _miss++;
@@ -253,14 +252,13 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp){
   // tensor literal and build the operation.
   if(elementType.isInteger(size)) {
     auto dataAttributes = mlir::DenseElementsAttr::get(dataType, data);
-    return builder.create<mlir::D::IntegerArrayOp>(Loc, dataAttributes.template
-                                                  cast<mlir::DenseIntElementsAttr>());
+    return builder.create<mlir::D::IntegerOp>(Loc, dataAttributes);
   } else if(isFloat){
     auto dataAttributes = mlir::DenseElementsAttr::get(dataType, dataF);
     if(elementType.isF64())
-      return builder.create<mlir::D::DoubleArrayOp>(Loc, dataAttributes);
+      return builder.create<mlir::D::DoubleOp>(Loc, dataAttributes);
     else
-      return builder.create<mlir::D::FloatArrayOp>(Loc, dataAttributes);
+      return builder.create<mlir::D::FloatOp>(Loc, dataAttributes);
   } else {
     _miss++;
     Logger::println("Unable to build ArrayLiteralExp: '%s'",
@@ -424,32 +422,37 @@ mlir::Value MLIRDeclaration::mlirGen(CastExp *castExp){
     _miss++;
   }
 
-  auto type = get_MLIRtype(castExp);
+  int size = 1;
+  if (auto isTensor = result.getType().template isa<mlir::TensorType>())
+    size = result.getType().cast<mlir::TensorType>().getNumElements();
 
-  bool ResultIsInteger = result.getType().isInteger(1) ||
+  auto singletype = get_MLIRtype(castExp);
+  auto type = mlir::RankedTensorType::get(size,singletype);
+
+  /*bool ResultIsInteger = result.getType().isInteger(1) ||
       result.getType().isInteger(8) || result.getType().isInteger(16) ||
       result.getType().isInteger(32) || result.getType().isInteger(64);
-  bool TypeIsFloat = type.isF16() || type.isF32() || type.isF64();
+  bool TypeIsFloat = singletype.isF16() || singletype.isF32() || singletype.isF64();
 
   //Extennd f16 -> f32 and f16, f32 -> f64
-  if(((result.getType().isF16() || result.getType().isF32()) && type.isF64())||
-      (result.getType().isF16() && type.isF32()))
+  if (((result.getType().isF16() || result.getType().isF32()) && singletype.isF64())||
+      (result.getType().isF16() && singletype.isF32()))
     return builder.create<mlir::FPExtOp>(location, result, type);
   // Cast to smaller type f64 -> f32; f64 -> f16; f32-> f16
-  else if (((result.getType().isF64() || result.getType().isF32()) && type.isF16())||
-           (result.getType().isF64() && type.isF32()))
+  else if (((result.getType().isF64() || result.getType().isF32()) && singletype.isF16())||
+           (result.getType().isF64() && singletype.isF32()))
     return builder.create<mlir::FPTruncOp>(location, result, type);
   // Extend i1 -> i8; i1, i8 -> i16; i1, i8, i16 -> i32; i1, i8, i16, i32 -> i64
-  else if(SizeIsGreaterThan(result.getType(), type))
+  else if(SizeIsGreaterThan(result.getType(), singletype))
     return builder.create<mlir::SignExtendIOp>(location, result, type);
   // Truncate i64->i32, i16, i8, i1; i32 -> i16, i8, i1; i16 -> i8, i1; i8 -> i1
-  else if(!SizeIsGreaterThan(result.getType(), type))
-    return builder.create<mlir::TruncateIOp>(location, result, type);
+  else if(!SizeIsGreaterThan(result.getType(), singletype))
+    return builder.create<mlir::D::TruncateOp>(location, result, type);
   // Cast Integer to Float
   else if(TypeIsFloat && ResultIsInteger)
     return builder.create<mlir::SIToFPOp>(location, result, type);
-  else
-    return builder.create<mlir::D::CastOp>(loc(castExp->loc), type, result);
+  else*/
+    return builder.create<mlir::D::CastOp>(location, type, result);
 }
 
 mlir::Value MLIRDeclaration::mlirGen(ConstructExp *constructExp){
@@ -604,13 +607,36 @@ mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp){
   dinteger_t dint = integerExp->value;
   Logger::println("MLIRGen - Integer: '%lu'", dint);
   mlir::Location location = builder.getUnknownLoc();
-  auto type = get_MLIRtype(integerExp);
   if (integerExp->loc.filename == NULL)
     location = builder.getUnknownLoc();
   else
     location = loc(integerExp->loc);
-  return builder.create<mlir::D::IntegerOp>(location,
-                                      builder.getIntegerAttr(type, dint));
+
+  auto basetype = integerExp->type->toBasetype();
+  mlir::RankedTensorType shapedType;
+  mlir::DenseElementsAttr dataAttribute;
+  if (basetype->ty == Tbool){
+    shapedType = mlir::RankedTensorType::get(1, builder.getIntegerType(1));
+    dataAttribute = mlir::DenseElementsAttr::get(shapedType, (bool)dint);
+  } else if (basetype->ty == Tint8 || basetype->ty == Tuns8) {
+    shapedType = mlir::RankedTensorType::get(1, builder.getIntegerType(8));
+    dataAttribute = mlir::DenseElementsAttr::get(shapedType, (char)dint);
+  } else if (basetype->ty == Tint16 || basetype->ty == Tuns16) {
+    shapedType = mlir::RankedTensorType::get(1, builder.getIntegerType(16));
+    dataAttribute = mlir::DenseElementsAttr::get(shapedType, (short)dint);
+  } else if (basetype->ty == Tint32 || basetype->ty == Tuns32) {
+    shapedType = mlir::RankedTensorType::get(1, builder.getIntegerType(32));
+    dataAttribute = mlir::DenseElementsAttr::get(shapedType, (int)dint);
+  } else if (basetype->ty == Tint64 || basetype->ty == Tuns64) {
+    shapedType = mlir::RankedTensorType::get(1, builder.getIntegerType(64));
+    dataAttribute = mlir::DenseElementsAttr::get(shapedType, (long)dint);
+  } else if (basetype->ty == Tint128 || basetype->ty == Tuns128) {
+    shapedType = mlir::RankedTensorType::get(1, builder.getIntegerType(128));
+    dataAttribute = mlir::DenseElementsAttr::get(shapedType, (dint));
+  }
+  auto op =  builder.create<mlir::D::IntegerOp>(location, dataAttribute);
+  return op;
+  //return builder.create<mlir::D::IntegerOp>(location, dataAttribute).getResult();
 }
 
 mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp, MinAssignExp *minAssignExp) {
@@ -740,14 +766,15 @@ mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp, MulAssignExp *mulAssignExp)
     return nullptr;
   }
 
-  if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
-     (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
+  auto tensor = e1.getType().cast<mlir::TensorType>();
+  auto type = tensor.getElementType();
+  if ((type.isF16() || type.isF32() || type.isF64()) &&
+     (type.isF16() || type.isF32() || type.isF64())) {
     result = builder.create<mlir::D::MulFOp>(*location, e1, e2).getResult();
   } else
-  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
-       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
-      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
-       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
+  if ((type.isInteger(8) || type.isInteger(16) || type.isInteger(32) ||
+       type.isInteger(64)) && (type.isInteger(8) || type.isInteger(16) ||
+       type.isInteger(32) || type.isInteger(64))) {
     result = builder.create<mlir::D::MulOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
@@ -816,12 +843,14 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp){
                          "from 1,8,16,32,64");
   mlir::Value e2 = nullptr;
   mlir::Location location = loc(postExp->loc);
+  auto shapedType = mlir::RankedTensorType::get({}, e1.getType());
+  auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, 1);
   if (e1.getType().isF32() || e1.getType().isF16())
-    e2 = builder.create<mlir::D::FloatOp>(location, e1.getType(), 1);
+    e2 = builder.create<mlir::D::FloatOp>(location, dataAttribute);
   else if (e1.getType().isF64())
-    e2 = builder.create<mlir::D::DoubleOp>(location, e1.getType(), 1);
+    e2 = builder.create<mlir::D::DoubleOp>(location, dataAttribute);
   else
-    e2 = builder.create<mlir::D::IntegerOp>(location, builder.getIntegerAttr(e1.getType(), 1));
+    e2 = builder.create<mlir::D::IntegerOp>(location, dataAttribute);
 
   if (postExp->op == TOKplusplus) {
     if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
