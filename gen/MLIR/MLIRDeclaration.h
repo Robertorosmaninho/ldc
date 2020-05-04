@@ -16,15 +16,19 @@
 
 #include "dmd/statement.h"
 #include "dmd/declaration.h"
+#include "dmd/errors.h"
 #include "dmd/expression.h"
+#include "dmd/id.h"
 #include "dmd/init.h"
 #include "dmd/template.h"
 #include "dmd/visitor.h"
 
+#include "gen/irstate.h"
 #include "gen/logger.h"
 #include "gen/modules.h"
-#include "gen/irstate.h"
+#include "gen/pragma.h"
 #include "gen/MLIR/Dialect.h"
+#include "gen/MLIR/IrFunction.h"
 #include "gen/MLIR/MLIRGen.h"
 
 #include "mlir/Dialect/StandardOps/Ops.h"
@@ -68,7 +72,7 @@ private:
 
 public:
   MLIRDeclaration(IRState *irs, Module *m, mlir::MLIRContext &context,
-      mlir::OpBuilder builder_,
+      mlir::OpBuilder builder,
       llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
       unsigned &total, unsigned &miss);
   ~MLIRDeclaration();
@@ -80,10 +84,6 @@ public:
       bool canSkipPostblitm, Type* t1, Type* t2);
   mlir::Value DtoMLIRSymbolAddress(mlir::Location loc, Type* type,
       Declaration* declaration);
-  mlir::FunctionType getFunctionType(FuncDeclaration *Fd, Type* thistype, Type* nesttype);
-  mlir::Type DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration);
-  mlir::Value DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration);
-  mlir::IntegerType DtoMLIRSize_t();
   mlir::Type get_MLIRtype(Expression* expression, Type* type = nullptr);
 
   //Expression
