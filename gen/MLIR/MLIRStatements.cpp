@@ -249,7 +249,7 @@ std::vector<mlir::Value> MLIRStatements::mlirGen(CompoundStatement *compoundStat
 }
 
 std::vector<mlir::Value> MLIRStatements::mlirGen(ScopeStatement *scopeStatement){
-  IF_LOG Logger::println("MLIRCodeGen - ScopeStatement: '%s'",
+  IF_LOG Logger::println("MLIRCodeGen - ScopeStatement: \n'%s'",
                          scopeStatement->toChars());
   LOG_SCOPE
   std::vector<mlir::Value> arrayValue;

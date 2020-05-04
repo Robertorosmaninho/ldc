@@ -9,7 +9,13 @@
 
 
 #if LDC_MLIR_ENABLED
-
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include <dmd/id.h>
+#include "gen/pragma.h"
+#include "dmd/errors.h"
+#include "gen/irstate.h"
+#include "gen/abi.h"
+#include "gen/runtime.h"
 #include "MLIRDeclaration.h"
 
 MLIRDeclaration::MLIRDeclaration(IRState *irs, Module *m,
@@ -351,6 +357,33 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp){
   IF_LOG Logger::println("MLIRCodeGen - CallExp: '%s'", callExp->toChars());
   LOG_SCOPE
   _total++;
+
+
+  VarDeclaration *delayedDtorVar = nullptr;
+  Expression *delayedDtorExp = nullptr;
+
+  if (callExp->f && callExp->f->isCtorDeclaration()) {
+    if (auto dve = callExp->e1->isDotVarExp())
+      if (auto ce = dve->e1->isCommaExp())
+        if (ce->e1->op == TOKdeclaration)
+          if (auto ve = ce->e2->isVarExp())
+            if (auto vd = ve->var->isVarDeclaration())
+              if (vd->needsScopeDtor()) {
+                Logger::println("Delaying edtor");
+                delayedDtorVar = vd;
+                delayedDtorExp = vd->edtor;
+                vd->edtor = nullptr;
+              }
+  }
+
+  // get the calle
+  mlir::Value fnval;
+  if (callExp->directcall) {
+    //Todo
+    auto dve = callExp->e1->isDotExp();
+  } else {
+    fnval = mlirGen(callExp->e1);
+  }
 
   std::vector<mlir::Type> types;
   StringRef functionName = callExp->f->mangleString;
@@ -893,14 +926,383 @@ mlir::Value MLIRDeclaration::mlirGen(StringExp *stringExp){
 
 mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp){
   _total++;
-  Logger::println("MLIRCodeGen - VarExp: '%s'", varExp->var->toChars());
+  IF_LOG Logger::println("MLIRCodeGen - VarExp: '%s'", varExp->toChars());
+  LOG_SCOPE
+
+  assert(varExp->var);
+
+  if(strncmp(varExp->toChars(),"writeln", 7) == 0)
+    fatal();
+
   auto var = symbolTable.lookup(varExp->var->toChars());
-  if (!var) {
-    IF_LOG Logger::println("Undeclared VarExp: '%s' | '%u'", varExp->toChars(), varExp->op);
+  if (var)
+    return var;
+
+  if (auto fd = varExp->var->isFuncLiteralDeclaration())
+    Logger::println("Build genFuncLiteral");
+    //TODO: genFuncLiteral(fd, nullptr) -> (FuncLiteralDeclaration, FuncExp)
+
+  if (auto em = varExp->var->isEnumMember()) {
+    IF_LOG Logger::println("Create temporary for enum member");
+    // Return the value of the enum member instead of trying to take its
+    // address (impossible because we don't emit them as variables)
+    // In most cases, the front-end constfolds a VarExp of an EnumMember,
+    // leaving the AST free of EnumMembers. However in rare cases,
+    // EnumMembers remain and thus we have to deal with them here.
+    // See DMD issues 16022 and 16100.
+    //TODO: return toElem(em->value(), p) -> Expression, bool
+  }
+
+  mlir::Type type = get_MLIRtype(nullptr, varExp->type);
+  if (type.isIntOrFloat()) {
+    IF_LOG Logger::println("Undeclared VarExp: '%s' | '%u'", varExp->toChars(),
+                           varExp->op);
     auto dataAttribute = builder.getIntegerAttr(builder.getIntegerType(32), 0);
     return builder.create<mlir::D::IntegerOp>(loc(varExp->loc), dataAttribute);
   }
-  return var;
+
+  return DtoMLIRSymbolAddress(loc(varExp->loc), varExp->type, varExp->var);
+}
+
+mlir::Value MLIRDeclaration::DtoMLIRSymbolAddress(mlir::Location loc,
+                                                  Type* type,
+                                                  Declaration* declaration) {
+  IF_LOG Logger::println("DtoMLIRSymbolAddress ('%s' of type '%s')",
+                         declaration->toChars(), declaration->type->toChars());
+  LOG_SCOPE
+
+  if (VarDeclaration *vd = declaration->isVarDeclaration()) {
+    // The magic variable __ctfe is always false at runtime
+    if (vd->ident == Id::ctfe)
+      return mlirGen(vd);//new DConstValue(type, DtoConstBool(false));
+
+    // this is an error! must be accessed with DotVarExp
+    if (vd->needThis()) {
+      error(vd->loc, "need `this` to access member `%s`", vd->toChars());
+      _miss++;
+      fatal();
+    }
+
+    // _arguments
+    if (vd->ident == Id::_arguments) {
+      Logger::println("Id::_arguments");
+      Logger::println("Build arguments traanslation");
+      _miss++;
+      fatal();
+    }
+
+    Logger::println("VarDeclaration - Missing MLIRGen!");
+    _miss++;
+    fatal();
+  }
+
+  if (FuncLiteralDeclaration *funcLiteralDeclaration =
+      declaration->isFuncLiteralDeclaration()) {
+    Logger::println("FuncLiteralDeclaration - Missing MLIRGen!");
+    _miss++;
+    fatal();
+  }
+
+  if (FuncDeclaration *funcDeclaration = declaration->isFuncDeclaration()) {
+    Logger::println("FuncDeclaration");
+    funcDeclaration = funcDeclaration->toAliasFunc();
+    auto Loc = funcDeclaration->loc;
+    if (funcDeclaration->llvmInternal == LLVMinline_asm) {
+      // TODO: Is this needed? If so, what about other intrinsics?
+      error(Loc, "special ldc inline asm is not a normal function");
+      fatal();
+    } else if (funcDeclaration->llvmInternal == LLVMinline_ir) {
+      // TODO: Is this needed? If so, what about other intrinsics?
+      error(Loc, "special ldc inline ir is not a normal function");
+      fatal();
+    }
+
+    DtoMLIRResolveFunction(funcDeclaration);
+
+  //  const auto mlirValue =
+  //      funcDeclaration->llvmInternal ? DtoMLIRCallee(funcDeclaration) :
+  //      nullptr;
+
+  //  return new DFuncValue(funcDeclaration, mlirValue);
+    }
+
+  if (SymbolDeclaration *symbolDeclaration = declaration->isSymbolDeclaration()) {
+    // this seems to be the static initialiser for structs
+    Logger::println("SymbolDeclaration - Missing MLIRGen!");
+    _miss++;
+    fatal();
+  }
+  return nullptr;
+  _miss++;
+  llvm_unreachable("Unimplemented VarExp type");
+}
+
+mlir::Value MLIRDeclaration::DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration) {
+  if ((!global.params.useUnitTests || !funcDeclaration->type) &&
+      funcDeclaration->isUnitTestDeclaration()) {
+    IF_LOG Logger::println("Ignoring unittest %s", funcDeclaration->toPrettyChars());
+    return nullptr; // ignore declaration completely
+  }
+
+  Type *type = funcDeclaration->type;
+  // If errors occurred compiling it, such as bugzilla 6118
+  if (type && type->ty == Tfunction) {
+    Type *next = static_cast<TypeFunction *>(type)->next;
+    if (!next || next->ty == Terror) {
+      return nullptr;
+    }
+  }
+
+  if (funcDeclaration->parent) {
+    if (TemplateInstance *templateInstance = funcDeclaration->parent->isTemplateInstance()) {
+      if (TemplateDeclaration *templateDeclaration =
+          templateInstance->tempdecl->isTemplateDeclaration()) {
+        if (templateDeclaration->llvmInternal == LLVMva_arg) {
+          Logger::println("magic va_arg found");
+          funcDeclaration->llvmInternal = LLVMva_arg;
+          return nullptr; // this gets mapped to an instruction so a declaration
+                          // makes no sense
+        }
+        if (templateDeclaration->llvmInternal == LLVMva_start) {
+          Logger::println("magic va_start found");
+          funcDeclaration->llvmInternal = LLVMva_start;
+        } else if (templateDeclaration->llvmInternal == LLVMintrinsic) {
+          Logger::println("overloaded intrinsic found");
+          assert(funcDeclaration->llvmInternal == LLVMintrinsic);
+          assert(funcDeclaration->mangleOverride.length);
+        } else if (templateDeclaration->llvmInternal == LLVMinline_asm) {
+          Logger::println("magic inline asm found");
+          TypeFunction *tf = static_cast<TypeFunction *>(funcDeclaration->type);
+          if (tf->parameterList.varargs != VARARGvariadic ||
+              (funcDeclaration->parameters && funcDeclaration->parameters->length != 0)) {
+            templateDeclaration->error("invalid `__asm` declaration, must be a D style "
+                            "variadic with no explicit parameters");
+            fatal();
+          }
+          funcDeclaration->llvmInternal = LLVMinline_asm;
+          return nullptr; // this gets mapped to a special inline asm call, no
+                          // point in going on.
+        } else if (templateDeclaration->llvmInternal == LLVMinline_ir) {
+          Logger::println("magic inline ir found");
+          funcDeclaration->llvmInternal = LLVMinline_ir;
+          funcDeclaration->linkage = LINKc;
+          Type *type = funcDeclaration->type;
+          assert(type->ty == Tfunction);
+          static_cast<TypeFunction *>(type)->linkage = LINKc;
+
+          getFunctionType(funcDeclaration, nullptr, nullptr);
+          return nullptr; // this gets mapped to a special inline IR call, no
+                          // point in going on.
+        }
+      }
+    }
+  }
+
+  getFunctionType(funcDeclaration, nullptr, nullptr);
+
+  IF_LOG Logger::println("DtoResolveFunction(%s): %s", funcDeclaration->toPrettyChars(),
+                         funcDeclaration->loc.toChars());
+  LOG_SCOPE;
+
+  /*// queue declaration unless the function is abstract without body
+  if (!funcDeclaration->isAbstract() || funcDeclaration->fbody) {
+    DtoMLIRDeclareFunction(funcDeclaration);
+  }*/
+}
+
+void DtoMLIRAddExtendAttr(Type *type, std::vector<mlir::Attribute> &attrs) {
+  // This function uses std dialect to get zext and sext, there's no
+  // benefit to have this op as D Dialect
+  type = type->toBasetype();
+  if (type->isintegral() && type->ty != Tvector && type->size() <= 2) {
+  //  mlir::ZeroExtendIOp::
+   // attrs.push_back(type->isunsigned() ?
+   //                 mlir::SignExtendIOp);
+   Logger::println("Zext: %d | Sext: %d", type->isunsigned(), type->isunsigned());
+  }
+}
+mlir::IntegerType MLIRDeclaration::DtoMLIRSize_t() {
+  // the type of size_t does not change once set
+  static mlir::IntegerType t = nullptr;
+  if (t == nullptr) {
+    auto triple = global.params.targetTriple;
+
+    if (triple->isArch64Bit()) {
+      t = builder.getIntegerType(64);
+    } else if (triple->isArch32Bit()) {
+      t = builder.getIntegerType(32);
+    } else if (triple->isArch16Bit()) {
+      t = builder.getIntegerType(16);
+    } else {
+      llvm_unreachable("Unsupported size_t width");
+    }
+  }
+  return t;
+}
+
+mlir::FunctionType MLIRDeclaration::getFunctionType(FuncDeclaration *Fd,
+                                                    Type* thistype, Type* nesttype) {
+  assert(Fd->type->ty == Tfunction);
+  IF_LOG Logger::println("Getting Function Type for '%s': '%s'",
+                         Fd->toChars(), Fd->type->toChars());
+
+  // sanity check
+  assert(Fd->type->ty == Tfunction);
+  TypeFunction *funcType = static_cast<TypeFunction*>(Fd->type);
+
+  assert(funcType->next && "Encountered function type with invalid return type;"
+                           " trying to codegen function ignored by the "
+                           "frontend?");
+
+  TargetABI *abi = Fd && DtoIsIntrinsic(Fd) ? TargetABI::getIntrinsic() : gABI;
+
+  // The index of the next argument on the LLVM level.
+  unsigned nextLLArgIdx = 0;
+
+  // functionType to be returned
+  mlir::FunctionType functionType;
+
+  // Type to be returned
+  mlir::Type ret;
+
+  // functionType name to be returned
+  std::string ret_name;
+
+  // Arguments
+  std::vector<std::pair<mlir::IntegerType, mlir::Type>> args;
+
+  //Logger::println("FuncType: %s  |  NextType: %s", funcType->toChars(),next->toChars());
+  const bool isMain = Fd && strncmp(Fd->toChars(), "main", 4) == 0;
+  if (isMain) {
+    // D and C main functions always return i32, even if declared as returning
+    // void.
+
+    ret = mlir::FunctionType::get({}, builder.getIntegerType(32), &context);
+    ret_name = "i32";
+  } else {
+    Type *next = funcType->next;
+    const bool byref = funcType->isref && next->toBasetype()->ty != Tvoid;
+    std::vector<mlir::Attribute> attrs;
+
+    if(abi->returnInArg(funcType, Fd && Fd->needThis())) {
+      // sret return
+      std::vector<mlir::Attribute> sretAttrs;
+      //sretAttrs.push_back(mlir::Attr)
+      Logger::println("StructType - Missing MLIRGen");
+      _miss++;
+      fatal();
+    } else {
+      // sext/zext return - TODO: What is this for?
+      DtoMLIRAddExtendAttr(byref ? next->pointerTo() : next, attrs);
+    }
+
+    ret = get_MLIRtype(nullptr, next);
+  }
+  ++nextLLArgIdx;
+
+  if (thistype) {
+    // Add the this pointer for member functions
+    Logger::println("arg_this - Missing MLIRGen");
+    _miss++;
+    fatal();
+  } else if (nesttype) {
+    // Add the context pointer for nested functions
+    Logger::println("arg_nest - Missing MLIRGen");
+    _miss++;
+    fatal();
+  }
+
+  bool hasObjCSelector = false;
+  if (Fd && Fd->linkage == LINKobjc && thistype) {
+    if (Fd->selector) {
+      hasObjCSelector = true;
+    } else if (Fd->parent->isClassDeclaration()) {
+      Fd->error("Objective-C `@selector` is missing");
+    }
+  }
+
+  if (hasObjCSelector) {
+    // TODO: make arg_objcselector to match dmd type
+    Logger::println("arg_objcSelector  - Missing MLIRGen");
+    ++nextLLArgIdx;
+  }
+
+  // Non-typesafe variadics (both C and D styles) are also variadics on the LLVM
+  // level.
+  const bool isLLVMVariadic = (funcType->parameterList.varargs == VARARGvariadic);
+  if (isLLVMVariadic && funcType->linkage == LINKd) {
+    // Add extra `_arguments` parameter for D-style variadic functions.
+    Logger::println("arg_arguments: '%s' - Missing MLIRGen", getTypeInfoType
+    ()->arrayOf()->toChars());
+    ++nextLLArgIdx;
+  }
+
+  const size_t numExplicitDArgs = funcType->parameterList.length();
+
+  // if this _Dmain() doesn't have an argument, we force it to have one
+  if (isMain && funcType->linkage != LINKc && numExplicitDArgs == 0) {
+    Type *mainargs = Type::tchar->arrayOf()->arrayOf();
+    Logger::println("Missing mainargs MLIRGen: %s", mainargs->toChars());
+
+    //newIrFty.args.push_back(new IrFuncTyArg(mainargs, false));
+    ++nextLLArgIdx;
+  }
+
+  auto llvmInternal = Fd->llvmInternal;
+
+  if (ret == nullptr) {
+    ret = builder.getNoneType();
+    ret_name = "NoneType";
+  }
+
+  IF_LOG Logger::cout() << "Final function type: " << ret_name << "\n";
+
+  return functionType;
+}
+
+mlir::Type MLIRDeclaration::DtoMLIRDeclareFunction(FuncDeclaration* funcDeclaration) {
+
+  IF_LOG Logger::println("DtoDeclareFunction(%s): %s", funcDeclaration->toPrettyChars(),
+                         funcDeclaration->loc.toChars());
+  LOG_SCOPE;
+
+  if (funcDeclaration->isUnitTestDeclaration() && !global.params.useUnitTests) {
+    Logger::println("unit tests not enabled");
+    return nullptr;
+  }
+
+  // printf("declare function: %s\n", fdecl->toPrettyChars());
+
+  // intrinsic sanity check
+  if (DtoIsIntrinsic(funcDeclaration) && funcDeclaration->fbody) {
+    error(funcDeclaration->loc, "intrinsics cannot have function bodies");
+    fatal();
+  }
+
+  //Check if the function is defineAsExternallyAvailable
+
+  // get TypeFunction*
+  Type *t = funcDeclaration->type->toBasetype();
+  TypeFunction *f = static_cast<TypeFunction*>(t);
+
+  mlir::FuncOp vaFunc = nullptr;
+  //if (DtoIsVaIntrinsic(funcDeclaration)) {
+  //  vafunc = DtoDeclareVaFunction(funcDeclaration);
+  //}
+
+  // Calling convention.
+  //
+  // DMD treats _Dmain as having C calling convention and this has been
+  // hardcoded into druntime, even if the frontend type has D linkage (Bugzilla
+  // issue 9028).
+  const bool forceC = DtoIsIntrinsic(funcDeclaration) || funcDeclaration->isMain();
+  const auto link = forceC ? LINKc : f->linkage;
+
+  // mangled name
+  mlir::FunctionType functionType =
+      static_cast<mlir::FunctionType>(getFunctionType(funcDeclaration,
+          nullptr, nullptr));
+  //mlir::FuncOp *func =
 }
 
 mlir::Value MLIRDeclaration::mlirGen(XorExp *xorExp, XorAssignExp *xorAssignExp){

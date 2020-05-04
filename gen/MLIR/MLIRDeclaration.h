@@ -14,8 +14,6 @@
 
 #if LDC_MLIR_ENABLED
 
-#define LDC_MLIRDECLARATION_H
-
 #include "dmd/statement.h"
 #include "dmd/declaration.h"
 #include "dmd/expression.h"
@@ -77,10 +75,15 @@ public:
 
   mlir::Value mlirGen(VarDeclaration* varDeclaration);
   mlir::Value mlirGen(Declaration* declaration);
-  mlir::DenseElementsAttr getConstantAttr(mlir::Value value);
   mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
       mlir::Value rhs, StringRef lhs_name, StringRef rhs_name, int op,
       bool canSkipPostblitm, Type* t1, Type* t2);
+  mlir::Value DtoMLIRSymbolAddress(mlir::Location loc, Type* type,
+      Declaration* declaration);
+  mlir::FunctionType getFunctionType(FuncDeclaration *Fd, Type* thistype, Type* nesttype);
+  mlir::Type DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration);
+  mlir::Value DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration);
+  mlir::IntegerType DtoMLIRSize_t();
   mlir::Type get_MLIRtype(Expression* expression, Type* type = nullptr);
 
   //Expression

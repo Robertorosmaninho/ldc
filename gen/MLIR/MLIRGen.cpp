@@ -39,8 +39,6 @@
 
 #include <memory>
 
-using namespace ldc_mlir;
-
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
@@ -198,6 +196,10 @@ private:
   mlir::FuncOp mlirGen(FuncDeclaration *Fd) {
     // Create a scope in the symbol table to hold variable declarations.
     ScopedHashTableScope<llvm::StringRef, mlir::Value> var_scope(symbolTable);
+
+    MLIRDeclaration declaration(irs, nullptr, context, builder,
+                                symbolTable, total, miss);
+    mlir::Type type = declaration.getFunctionType(Fd, nullptr, nullptr);
 
     // Create an MLIR function for the given prototype.
     mlir::FuncOp function = mlirGen(Fd, true);
