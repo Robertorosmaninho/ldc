@@ -41,6 +41,7 @@ DDialect::DDialect(mlir::MLIRContext *context) : mlir::Dialect("D",
 //===----------------------------------------------------------------------===//
 // AddOp
 
+/*
 void D::AddOp::build(mlir::Builder *b, mlir::OperationState &state,
                      mlir::Value lhs, mlir::Value rhs) {
   if(lhs.getType() == rhs.getType())
@@ -50,7 +51,6 @@ void D::AddOp::build(mlir::Builder *b, mlir::OperationState &state,
   state.addOperands({lhs, rhs});
 }
 
-
 void D::AddFOp::build(mlir::Builder *b, mlir::OperationState &state,
                       mlir::Value lhs, mlir::Value rhs) {
   if(lhs.getType() == rhs.getType())
@@ -58,7 +58,7 @@ void D::AddFOp::build(mlir::Builder *b, mlir::OperationState &state,
   else
     state.addTypes(mlir::NoneType::get(b->getContext()));
   state.addOperands({lhs, rhs});
-}
+}*/
 
 void D::SubOp::build(mlir::Builder *b, mlir::OperationState &state,
                   mlir::Value lhs, mlir::Value rhs) {

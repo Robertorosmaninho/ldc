@@ -24,11 +24,99 @@ else()
     message(STATUS "Found mlir-tblgen: ${MLIR_TABLEGEN}")
     get_filename_component(MLIR_BIN_DIR ${MLIR_TABLEGEN} DIRECTORY CACHE)
     get_filename_component(MLIR_ROOT_DIR "${MLIR_BIN_DIR}/.." ABSOLUTE CACHE)
+    include_directories(${MLIR_ROOT_DIR}/../build/tools/mlir/include)
     set(MLIR_INCLUDE_DIR ${MLIR_ROOT_DIR}/include)
     set(MLIR_LIB_DIR     ${MLIR_ROOT_DIR}/lib)
 
     # To be done: add the required MLIR libraries. Hopefully we don't have to manually list all MLIR libs.
-    set(MLIR_LIBRARIES "")
+    set(MLIR_LIBRARIES
+            libMLIRAVX512.a
+            libMLIRAVX512ToLLVM.a
+            libMLIRAffineEDSC.a
+            libMLIRAffineOps.a
+            libMLIRAffineToStandard.a
+            libMLIRAffineTransforms.a
+            libMLIRAffineTransformsTestPasses.a
+            libMLIRAffineUtils.a
+            libMLIRAnalysis.a
+            libMLIRCallInterfaces.a
+            libMLIRControlFlowInterfaces.a
+            libMLIRDerivedAttributeOpInterface.a
+            libMLIRDialect.a
+            libMLIREDSC.a
+            libMLIRExecutionEngine.a
+            libMLIRFxpMathOps.a
+            libMLIRGPU.a
+            libMLIRGPUtoCUDATransforms.a
+            libMLIRGPUtoNVVMTransforms.a
+            libMLIRGPUtoROCDLTransforms.a
+            libMLIRGPUtoSPIRVTransforms.a
+            libMLIRGPUtoVulkanTransforms.a
+            libMLIRIR.a
+            libMLIRInferTypeOpInterface.a
+            libMLIRJitRunner.a
+            libMLIRLLVMAVX512.a
+            libMLIRLLVMIR.a
+            libMLIRLLVMIRTransforms.a
+            libMLIRLinalg.a
+            libMLIRLinalgAnalysis.a
+            libMLIRLinalgEDSC.a
+            libMLIRLinalgOps.a
+            libMLIRLinalgToLLVM.a
+            libMLIRLinalgToSPIRVTransforms.a
+            libMLIRLinalgTransforms.a
+            libMLIRLinalgUtils.a
+            libMLIRLoopAnalysis.a
+            libMLIRLoopLikeInterface.a
+            libMLIRLoopOps.a
+            libMLIRLoopOpsTransforms.a
+            libMLIRLoopToStandard.a
+            libMLIRLoopsToGPU.a
+            libMLIRMlirOptLib.a
+            libMLIRNVVMIR.a
+            libMLIROpenMP.a
+            libMLIROptLib.a
+            libMLIROptMain.a
+            libMLIRParser.a
+            libMLIRPass.a
+            libMLIRQuant.a
+            libMLIRQuantOps.a
+            libMLIRQuantizerFxpMathConfig.a
+            libMLIRQuantizerSupport.a
+            libMLIRQuantizerTransforms.a
+            libMLIRROCDLIR.a
+            libMLIRSDBM.a
+            libMLIRSPIRV.a
+            libMLIRSPIRVSerialization.a
+            libMLIRSPIRVTestPasses.a
+            libMLIRSPIRVTransforms.a
+            libMLIRShape.a
+            libMLIRSideEffects.a
+            libMLIRStandardOps.a
+            libMLIRStandardOpsTransforms.a
+            libMLIRStandardToLLVM.a
+            libMLIRStandardToSPIRVTransforms.a
+            libMLIRStandardToStandard.a
+            libMLIRSupport.a
+            libMLIRTargetAVX512.a
+            libMLIRTargetLLVMIR.a
+            libMLIRTargetLLVMIRModuleTranslation.a
+            libMLIRTargetNVVMIR.a
+            libMLIRTargetROCDLIR.a
+            libMLIRTestDialect.a
+            libMLIRTestIR.a
+            libMLIRTestPass.a
+            libMLIRTestTransforms.a
+            libMLIRTransformUtils.a
+            libMLIRTransforms.a
+            libMLIRTranslateClParser.a
+            libMLIRTranslation.a
+            libMLIRVector.a
+            libMLIRVectorOps.a
+            libMLIRVectorToLLVM.a
+            libMLIRVectorToLoops.a
+            libMLIRViewLikeInterface.a
+            )
 
     # XXX: This function is untested and will need adjustment.
     function(mlir_tablegen)
