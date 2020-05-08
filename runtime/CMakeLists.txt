@@ -53,7 +53,7 @@ set(RT_SUPPORT_SANITIZERS OFF                                 CACHE BOOL   "Buil
 set(CMAKE_INSTALL_LIBDIR ${CMAKE_INSTALL_PREFIX}/lib${LIB_SUFFIX})
 
 set(DRUNTIME_EXTRA_FLAGS          -preview=fieldwise)
-set(DRUNTIME_EXTRA_UNITTEST_FLAGS -d-version=CoreUnittest -unittest) # no `-checkaction=context` yet
+set(DRUNTIME_EXTRA_UNITTEST_FLAGS -d-version=CoreUnittest -unittest -checkaction=context)
 set(PHOBOS2_EXTRA_FLAGS           -transition=complex)
 set(PHOBOS2_EXTRA_UNITTEST_FLAGS  -d-version=StdUnittest -unittest)
 
@@ -161,6 +161,7 @@ list(REMOVE_ITEM DRUNTIME_D ${DRUNTIME_D_STDCPP})
 list(REMOVE_ITEM DRUNTIME_D
     ${RUNTIME_DIR}/src/rt/alloca.d
     ${RUNTIME_DIR}/src/rt/llmath.d
+    ${RUNTIME_DIR}/src/rt/memset.d
 )
 # only include core/sys/ modules matching the platform
 file(GLOB_RECURSE DRUNTIME_D_BIONIC  ${RUNTIME_DIR}/src/core/sys/bionic/*.d)
