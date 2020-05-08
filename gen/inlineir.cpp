@@ -196,7 +196,7 @@ DValue *DtoInlineIRExpr(Loc &loc, FuncDeclaration *fdecl,
     std::unique_ptr<llvm::Module> m =
         llvm::parseAssemblyString(stream.str().c_str(), err, gIR->context());
 
-    std::string errstr = err.getMessage();
+    std::string errstr(err.getMessage());
     if (!errstr.empty()) {
       error(tinst->loc,
             "can't parse inline LLVM IR:\n`%s`\n%s\n%s\nThe input string "
@@ -204,6 +204,7 @@ DValue *DtoInlineIRExpr(Loc &loc, FuncDeclaration *fdecl,
             err.getLineContents().str().c_str(),
             (std::string(err.getColumnNo(), ' ') + '^').c_str(), errstr.c_str(),
             stream.str().c_str());
+      fatal();
     }
 
     m->setDataLayout(gIR->module.getDataLayout());

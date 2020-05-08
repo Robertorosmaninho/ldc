@@ -73,7 +73,7 @@ void codegenModule(llvm::TargetMachine &Target, llvm::Module &m,
   if (cb == ComputeBackend::SPIRV) {
 #ifdef LDC_LLVM_SUPPORTED_TARGET_SPIRV
     IF_LOG Logger::println("running createSPIRVWriterPass()");
-#if LDC_LLVM_VER >= 900 && LDC_LLVM_VER < 1000
+#if LDC_LLVM_VER >= 900
     std::ofstream out(filename, std::ofstream::binary);
 #else
     std::error_code errinfo;
@@ -363,7 +363,7 @@ void writeModule(llvm::Module *m, const char *filename) {
     llvm::SmallString<128> buffer(filename);
     llvm::sys::path::replace_extension(buffer,
                                        llvm::StringRef(ext.ptr, ext.length));
-    return buffer.str();
+    return {buffer.data(), buffer.size()};
   };
 
   // write LLVM bitcode
@@ -434,7 +434,7 @@ void writeModule(llvm::Module *m, const char *filename) {
     if (!global.params.output_s) {
       llvm::SmallString<16> buffer;
       llvm::sys::fs::createUniqueFile("ldc-%%%%%%%.s", buffer);
-      spath = buffer.str();
+      spath = {buffer.data(), buffer.size()};
     } else {
       spath = replaceExtensionWith(global.s_ext);
     }

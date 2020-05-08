@@ -1,8 +1,9 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Implement CTFE for intrinsic (builtin) functions.
  *
- * Copyright:   Copyright (C) 1999-2019 by The D Language Foundation, All Rights Reserved
+ * Currently includes functions from `std.math`, `core.math` and `core.bitop`.
+ *
+ * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/builtin.d, _builtin.d)
@@ -665,11 +666,11 @@ public extern (C++) void builtin_init()
 {
 version (IN_LLVM)
 {
-    builtins._init(201);
+    builtins._init(204);
 }
 else
 {
-    builtins._init(65);
+    builtins._init(113);
 }
     // @safe @nogc pure nothrow real function(real)
     add_builtin("_D4core4math3sinFNaNbNiNfeZe", &eval_sin);
@@ -692,6 +693,17 @@ else
     add_builtin("_D4core4math4sqrtFNaNbNiNffZf", &eval_sqrt);
     // @safe @nogc pure nothrow real function(real, real)
     add_builtin("_D4core4math5atan2FNaNbNiNfeeZe", &eval_unimp);
+version (IN_LLVM)
+{
+    // Our implementations in CTFloat fall back to a generic version in case
+    // host compiler's druntime doesn't provide core.math.yl2x[p1] (GDC,
+    // non-x86 hosts). Not providing yl2x[p1] for CTFE would significantly
+    // limit CTFE-ability of std.math for x86 targets.
+    add_builtin("_D4core4math4yl2xFNaNbNiNfeeZe", &eval_yl2x);
+    add_builtin("_D4core4math6yl2xp1FNaNbNiNfeeZe", &eval_yl2xp1);
+}
+else
+{
     if (CTFloat.yl2x_supported)
     {
         add_builtin("_D4core4math4yl2xFNaNbNiNfeeZe", &eval_yl2x);
@@ -708,18 +720,22 @@ else
     {
         add_builtin("_D4core4math6yl2xp1FNaNbNiNfeeZe", &eval_unimp);
     }
+}
     // @safe @nogc pure nothrow long function(real)
     add_builtin("_D4core4math6rndtolFNaNbNiNfeZl", &eval_unimp);
     // @safe @nogc pure nothrow real function(real)
     add_builtin("_D3std4math3tanFNaNbNiNfeZe", &eval_tan);
+    add_builtin("_D3std4math4trig3tanFNaNbNiNfeZe", &eval_tan);
     add_builtin("_D3std4math5expm1FNaNbNiNfeZe", &eval_unimp);
     // @trusted @nogc pure nothrow real function(real)
     add_builtin("_D3std4math3tanFNaNbNiNeeZe", &eval_tan);
+    add_builtin("_D3std4math4trig3tanFNaNbNiNeeZe", &eval_tan);
     add_builtin("_D3std4math3expFNaNbNiNeeZe", &eval_exp);
     add_builtin("_D3std4math5expm1FNaNbNiNeeZe", &eval_expm1);
     add_builtin("_D3std4math4exp2FNaNbNiNeeZe", &eval_exp2);
     // @safe @nogc pure nothrow real function(real, real)
     add_builtin("_D3std4math5atan2FNaNbNiNfeeZe", &eval_unimp);
+    add_builtin("_D3std4math4trig5atan2FNaNbNiNfeeZe", &eval_unimp);
 version (IN_LLVM)
 {
     // LDC's core.math.ldexp is defined as alias to core.stdc.math.ldexpl

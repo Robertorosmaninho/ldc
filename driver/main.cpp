@@ -14,6 +14,7 @@
 #include "dmd/identifier.h"
 #include "dmd/hdrgen.h"
 #include "dmd/json.h"
+#include "dmd/ldcbindings.h"
 #include "dmd/mars.h"
 #include "dmd/module.h"
 #include "dmd/mtype.h"
@@ -121,7 +122,7 @@ void printVersion(llvm::raw_ostream &OS) {
 #endif
 #endif
   OS << "  Default target: " << llvm::sys::getDefaultTargetTriple() << "\n";
-  std::string CPU = llvm::sys::getHostCPUName();
+  std::string CPU(llvm::sys::getHostCPUName());
   if (CPU == "generic" || env::has("SOURCE_DATE_EPOCH")) {
     // Env variable SOURCE_DATE_EPOCH indicates that a reproducible build is
     // wanted. Don't print the actual host CPU in such an environment to aid
@@ -171,7 +172,7 @@ void processVersions(std::vector<std::string> &list, const char *type,
       char *cstr = mem.xstrdup(value);
       if (Identifier::isValidIdentifier(cstr)) {
         if (!globalIDs)
-          globalIDs = new Strings();
+          globalIDs = createStrings();
         globalIDs->push(cstr);
         continue;
       } else {
@@ -236,26 +237,36 @@ tryGetExplicitTriple(const llvm::SmallVectorImpl<const char *> &args) {
   // most combinations of flags are illegal, this mimicks command line
   //  behaviour for legal ones only
   llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
+  unsigned explicitBitness = 0;
   const char *mtriple = nullptr;
   const char *march = nullptr;
   for (size_t i = 1; i < args.size(); ++i) {
     if (args::isRunArg(args[i]))
       break;
 
-    llvm::StringRef arg = args[i];
-    if (sizeof(void *) != 4 && (arg == "-m32" || arg == "--m32")) {
+    const llvm::StringRef arg = args[i];
+    if (arg == "-m32" || arg == "--m32") {
+      explicitBitness = 32;
+    } else if (arg == "-m64" || arg == "--m64") {
+      explicitBitness = 64;
+    } else {
+      tryParse(args, i, mtriple, "mtriple");
+      tryParse(args, i, march, "march");
+    }
+  }
+
+  // -m{32,64} and -mtriple/-march are mutually exclusive (checked later on)
+  if (explicitBitness) {
+    if (!triple.isArch32Bit() && explicitBitness == 32) {
       triple = triple.get32BitArchVariant();
       if (triple.getArch() == llvm::Triple::ArchType::x86)
         triple.setArchName("i686"); // instead of i386
-      return triple;
+    } else if (!triple.isArch64Bit() && explicitBitness == 64) {
+      triple = triple.get64BitArchVariant();
     }
-
-    if (sizeof(void *) != 8 && (arg == "-m64" || arg == "--m64"))
-      return triple.get64BitArchVariant();
-
-    tryParse(args, i, mtriple, "mtriple");
-    tryParse(args, i, march, "march");
+    return triple;
   }
+
   if (mtriple)
     triple = llvm::Triple(llvm::Triple::normalize(mtriple));
   if (march) {
@@ -352,9 +363,10 @@ void parseCommandLine(Strings &sourceFiles) {
   global.params.objname = opts::fromPathString(objectFile);
   global.params.objdir = opts::fromPathString(objectDir);
 
-  global.params.docdir = opts::fromPathString(ddocDir).ptr;
-  global.params.docname = opts::fromPathString(ddocFile).ptr;
-  global.params.doDocComments |= global.params.docdir || global.params.docname;
+  global.params.docdir = opts::fromPathString(ddocDir);
+  global.params.docname = opts::fromPathString(ddocFile);
+  global.params.doDocComments |=
+      global.params.docdir.length || global.params.docname.length;
 
   global.params.jsonfilename = opts::fromPathString(jsonFile);
   if (global.params.jsonfilename.length) {
@@ -365,6 +377,11 @@ void parseCommandLine(Strings &sourceFiles) {
   global.params.hdrname = opts::fromPathString(hdrFile);
   global.params.doHdrGeneration |=
       global.params.hdrdir.length || global.params.hdrname.length;
+
+  global.params.cxxhdrdir = opts::fromPathString(cxxHdrDir);
+  global.params.cxxhdrname = opts::fromPathString(cxxHdrFile);
+  global.params.doCxxHdrGeneration |=
+      global.params.cxxhdrdir.length || global.params.cxxhdrname.length;
 
   global.params.mixinFile = opts::fromPathString(mixinFile).ptr;
 
@@ -425,10 +442,9 @@ void parseCommandLine(Strings &sourceFiles) {
   for (const auto &id : reverts)
     parseRevertOption(global.params, id.c_str());
 
-
   if (global.params.useDIP1021) // DIP1021 implies DIP1000
     global.params.vsafe = true;
-  if (global.params.vsafe)      // DIP1000 implies DIP25
+  if (global.params.vsafe) // DIP1000 implies DIP25
     global.params.useDIP25 = true;
   if (global.params.noDIP25)
     global.params.useDIP25 = false;
@@ -573,7 +589,7 @@ void fixupUClibcEnv() {
   llvm::Triple triple(mTargetTriple);
   if (triple.getEnvironmentName().find("uclibc") != 0)
     return;
-  std::string envName = triple.getEnvironmentName();
+  std::string envName(triple.getEnvironmentName());
   envName.replace(0, 6, "gnu");
   triple.setEnvironmentName(envName);
   mTargetTriple = triple.normalize();
@@ -820,11 +836,35 @@ void registerPredefinedTargetVersions() {
     VersionCondition::addPredefinedGlobalIdent("AIX");
     VersionCondition::addPredefinedGlobalIdent("Posix");
     break;
+  case llvm::Triple::IOS:
+    VersionCondition::addPredefinedGlobalIdent("iOS");
+    VersionCondition::addPredefinedGlobalIdent("Posix");
+    VersionCondition::addPredefinedGlobalIdent("CppRuntime_Clang");
+    break;
+  case llvm::Triple::TvOS:
+    VersionCondition::addPredefinedGlobalIdent("TVOS");
+    VersionCondition::addPredefinedGlobalIdent("Posix");
+    VersionCondition::addPredefinedGlobalIdent("CppRuntime_Clang");
+    break;
+  case llvm::Triple::WatchOS:
+    VersionCondition::addPredefinedGlobalIdent("WatchOS");
+    VersionCondition::addPredefinedGlobalIdent("Posix");
+    VersionCondition::addPredefinedGlobalIdent("CppRuntime_Clang");
+    break;
+#if LDC_LLVM_VER >= 800
+  case llvm::Triple::WASI:
+    VersionCondition::addPredefinedGlobalIdent("WASI");
+    VersionCondition::addPredefinedGlobalIdent("CRuntime_WASI");
+    break;
+#endif
   default:
     if (triple.getEnvironment() == llvm::Triple::Android) {
       VersionCondition::addPredefinedGlobalIdent("Android");
-    } else if (triple.getOSName() != "unknown") {
-      warning(Loc(), "unknown target OS: %s", triple.getOSName().str().c_str());
+    } else {
+      llvm::StringRef osName = triple.getOSName();
+      if (!osName.empty() && osName != "unknown" && osName != "none") {
+        warning(Loc(), "unknown target OS: %s", osName.str().c_str());
+      }
     }
     break;
   }
@@ -903,9 +943,6 @@ void registerPredefinedVersions() {
 #undef STR
 }
 
-// in druntime:
-extern "C" void gc_disable();
-
 /// LDC's entry point, C main.
 /// Without `-lowmem`, we need to switch to the bump-pointer allocation scheme
 /// right from the start, before any module ctors are run, so we need this hook
@@ -953,11 +990,6 @@ int main(int argc, const char **originalArgv)
 }
 
 int cppmain() {
-  // Older host druntime versions need druntime to be initialized before
-  // disabling the GC, so we cannot disable it in C main above.
-  if (!mem.isGCEnabled())
-    gc_disable();
-
   exe_path::initialize(allArguments[0]);
 
   global._init();

@@ -94,7 +94,21 @@ static void replace_func_name(IRState *p, std::string &insnt) {
   }
 }
 
+Statement *gccAsmSemantic(GccAsmStatement *s, Scope *sc);
+
 Statement *asmSemantic(AsmStatement *s, Scope *sc) {
+  if (!s->tokens) {
+    return nullptr;
+  }
+
+  sc->func->hasReturnExp |= 8;
+
+  // GCC-style asm starts with a string literal or a `(`
+  if (s->tokens->value == TOKstring || s->tokens->value == TOKlparen) {
+    auto gas = createGccAsmStatement(s->loc, s->tokens);
+    return gccAsmSemantic(gas, sc);
+  }
+
   auto ias = createInlineAsmStatement(s->loc, s->tokens);
   s = ias;
 
@@ -102,9 +116,12 @@ Statement *asmSemantic(AsmStatement *s, Scope *sc) {
   llvm::Triple const &t = *global.params.targetTriple;
   if (!(t.getArch() == llvm::Triple::x86 ||
         t.getArch() == llvm::Triple::x86_64)) {
-    s->error("the `asm` statement is not supported for the \"%s\" "
-             "architecture, use `ldc.llvmasm.__asm` instead",
-             t.getArchName().str().c_str());
+    s->error(
+        "DMD-style `asm { op; }` statements are not supported for the \"%s\" "
+        "architecture.",
+        t.getArchName().str().c_str());
+    errorSupplemental(s->loc, "Use GDC-style `asm { \"op\" : …; }` syntax or "
+                              "`ldc.llvmasm.__asm` instead.");
     err = true;
   }
   if (!global.params.useInlineAsm) {
@@ -120,14 +137,6 @@ Statement *asmSemantic(AsmStatement *s, Scope *sc) {
   }
 
   // puts(toChars());
-
-  sc->func->hasReturnExp |= 8;
-
-  // empty statement -- still do the above things because they might be
-  // expected?
-  if (!s->tokens) {
-    return s;
-  }
 
   if (!asmparser) {
     if (t.getArch() == llvm::Triple::x86) {
@@ -346,7 +355,8 @@ void AsmStatement_toIR(InlineAsmStatement *stmt, IRState *irs) {
       // Change update operand to pure output operand.
       oc = mw_cns;
 
-      // Add input operand with same value, with original as "matching output".
+      // Add input operand with same value, with original as "matching
+      // output".
       std::ostringstream ss;
       ss << '*' << (n + asmblock->outputcount);
       // Must be at the back; unused operands before used ones screw up
@@ -460,6 +470,23 @@ void CompoundAsmStatement_toIR(CompoundAsmStatement *stmt, IRState *p) {
                          stmt->loc.toChars());
   LOG_SCOPE;
 
+  const bool isCompoundGccAsmStatement =
+      (stmt->statements && stmt->statements->length &&
+       stmt->statements->front()->isGccAsmStatement());
+  if (isCompoundGccAsmStatement) {
+    for (Statement *s : *stmt->statements) {
+      if (auto gas = s->isGccAsmStatement()) {
+        Statement_toIR(gas, p);
+      } else {
+        s->error("DMD-style assembly statement unsupported within GCC-style "
+                 "`asm` block");
+        fatal();
+      }
+    }
+
+    return;
+  }
+
   // disable inlining by default
   if (!p->func()->decl->allowInlining) {
     p->func()->setNeverInline();
@@ -474,6 +501,11 @@ void CompoundAsmStatement_toIR(CompoundAsmStatement *stmt, IRState *p) {
   // do asm statements
   for (Statement *s : *stmt->statements) {
     if (s) {
+      if (s->isGccAsmStatement()) {
+        s->error("GCC-style assembly statement unsupported within DMD-style "
+                 "`asm` block");
+        fatal();
+      }
       Statement_toIR(s, p);
     }
   }
@@ -496,7 +528,8 @@ void CompoundAsmStatement_toIR(CompoundAsmStatement *stmt, IRState *p) {
     mangleToBuffer(fd, &mangleBuf);
     const char *fdmangle = mangleBuf.peekChars();
 
-    // we use a simple static counter to make sure the new end labels are unique
+    // we use a simple static counter to make sure the new end labels are
+    // unique
     static size_t uniqueLabelsId = 0;
     std::ostringstream asmGotoEndLabel;
     printLabelName(asmGotoEndLabel, fdmangle, "_llvm_asm_end");
@@ -683,6 +716,7 @@ void CompoundAsmStatement_toIR(CompoundAsmStatement *stmt, IRState *p) {
 
   llvm::CallInst *call = p->ir->CreateCall(
       ia, args, retty == LLType::getVoidTy(gIR->context()) ? "" : "asm");
+  p->addInlineAsmSrcLoc(stmt->loc, call);
 
   IF_LOG Logger::cout() << "Complete asm statement: " << *call << '\n';
 

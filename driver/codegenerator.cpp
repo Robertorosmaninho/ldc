@@ -11,6 +11,7 @@
 
 #include "dmd/compiler.h"
 #include "dmd/errors.h"
+#include "dmd/globals.h"
 #include "dmd/id.h"
 #include "dmd/module.h"
 #include "dmd/scope.h"
@@ -36,7 +37,7 @@
 
 #if LDC_LLVM_VER < 600
 namespace llvm {
-  using ToolOutputFile = tool_output_file;
+using ToolOutputFile = tool_output_file;
 }
 #endif
 
@@ -106,10 +107,6 @@ createAndSetDiagnosticsOutputFile(IRState &irs, llvm::LLVMContext &ctx,
   return diagnosticsOutputFile;
 }
 
-} // anonymous namespace
-
-namespace {
-
 #if LDC_LLVM_VER < 500
 /// Add the Linker Options module flag.
 /// If the flag is already present, merge it with the new data.
@@ -155,7 +152,7 @@ void emitLinkerOptions(IRState &irs) {
 }
 #else
 void addLinkerMetadata(llvm::Module &M, const char *name,
-    llvm::ArrayRef<llvm::MDNode *> newOperands) {
+                       llvm::ArrayRef<llvm::MDNode *> newOperands) {
   if (newOperands.empty())
     return;
 
@@ -208,7 +205,30 @@ void emitLLVMUsedArray(IRState &irs) {
   llvmUsed->setSection("llvm.metadata");
 }
 
+void inlineAsmDiagnosticHandler(const llvm::SMDiagnostic &d, void *context,
+                                unsigned locCookie) {
+  if (d.getKind() == llvm::SourceMgr::DK_Error)
+    ++global.errors;
+
+  if (!locCookie) {
+    d.print(nullptr, llvm::errs());
+    return;
+  }
+
+  // replace the `<inline asm>` dummy filename by the LOC of the actual D
+  // expression/statement (`myfile.d(123)`)
+  const Loc &loc =
+      static_cast<IRState *>(context)->getInlineAsmSrcLoc(locCookie);
+  const char *filename = loc.toChars(/*showColumns*/ false);
+
+  // keep on using llvm::SMDiagnostic::print() for nice, colorful output
+  llvm::SMDiagnostic d2(*d.getSourceMgr(), d.getLoc(), filename, d.getLineNo(),
+                        d.getColumnNo(), d.getKind(), d.getMessage(),
+                        d.getLineContents(), d.getRanges(), d.getFixIts());
+  d2.print(nullptr, llvm::errs());
 }
+
+} // anonymous namespace
 
 namespace ldc {
 CodeGenerator::CodeGenerator(llvm::LLVMContext &context,
@@ -303,6 +323,8 @@ void CodeGenerator::writeAndFreeLLModule(const char *filename) {
   llvm::Metadata *IdentNode[] = {llvm::MDString::get(ir_->context(), Version)};
   IdentMetadata->addOperand(llvm::MDNode::get(ir_->context(), IdentNode));
 
+  context_.setInlineAsmDiagnosticHandler(inlineAsmDiagnosticHandler, ir_);
+
   std::unique_ptr<llvm::ToolOutputFile> diagnosticsOutputFile =
       createAndSetDiagnosticsOutputFile(*ir_, context_, filename);
 
@@ -336,26 +358,6 @@ void CodeGenerator::emit(Module *m) {
   prepareLLModule(m);
 
   codegenModule(ir_, m);
-
-  if (m == rootHasMain) {
-    if (global.params.targetTriple->getEnvironment() == llvm::Triple::Android) {
-      // On Android, bracket TLS data with the symbols _tlsstart and _tlsend, as
-      // done with dmd
-      auto startSymbol = new llvm::GlobalVariable(
-          ir_->module, llvm::Type::getInt32Ty(ir_->module.getContext()), false,
-          llvm::GlobalValue::ExternalLinkage,
-          llvm::ConstantInt::get(ir_->module.getContext(), APInt(32, 0)),
-          "_tlsstart", &*(ir_->module.global_begin()));
-      startSymbol->setSection(".tdata");
-
-      auto endSymbol = new llvm::GlobalVariable(
-          ir_->module, llvm::Type::getInt32Ty(ir_->module.getContext()), false,
-          llvm::GlobalValue::ExternalLinkage,
-          llvm::ConstantInt::get(ir_->module.getContext(), APInt(32, 0)),
-          "_tlsend");
-      endSymbol->setSection(".tcommon");
-    }
-  }
 
   finishLLModule(m);
 
