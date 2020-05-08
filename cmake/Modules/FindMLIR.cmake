@@ -24,11 +24,71 @@ else()
     message(STATUS "Found mlir-tblgen: ${MLIR_TABLEGEN}")
     get_filename_component(MLIR_BIN_DIR ${MLIR_TABLEGEN} DIRECTORY CACHE)
     get_filename_component(MLIR_ROOT_DIR "${MLIR_BIN_DIR}/.." ABSOLUTE CACHE)
+    include_directories(${MLIR_ROOT_DIR}/../build/tools/mlir/include)
     set(MLIR_INCLUDE_DIR ${MLIR_ROOT_DIR}/include)
     set(MLIR_LIB_DIR     ${MLIR_ROOT_DIR}/lib)
 
     # To be done: add the required MLIR libraries. Hopefully we don't have to manually list all MLIR libs.
-    set(MLIR_LIBRARIES "")
+    set(suffix "a")
+    if(EXISTS "libMLIRIR.lib")
+      set(suffix "lib")
+    endif()
+
+    set(MLIR_LIBRARIES
+                				libMLIRAffineOps.${suffix}
+                        libMLIRAffineToStandard.${suffix}
+                        libMLIRAnalysis.${suffix}
+                        libMLIRDialect.${suffix}
+                        libMLIREDSC.${suffix}
+                        libMLIRExecutionEngine.${suffix}
+                        libMLIRFxpMathOps.${suffix}
+                        libMLIRGPU.${suffix}
+                        libMLIRGPUtoNVVMTransforms.${suffix}
+                        libMLIRGPUtoROCDLTransforms.${suffix}
+                        libMLIRGPUtoSPIRVTransforms.${suffix}
+                        libMLIRIR.${suffix}
+                        libMLIRJitRunner.${suffix}
+                        libMLIRLinalg.${suffix}
+                        libMLIRLinalgToLLVM.${suffix}
+                        libMLIRLLVMIR.${suffix}
+                        libMLIRLoopOps.${suffix}
+                        libMLIRLoopsToGPU.${suffix}
+                        libMLIRLoopToStandard.${suffix}
+                        libMLIRMlirOptLib.${suffix}
+                        libMLIRNVVMIR.${suffix}
+                        libMLIROptMain.${suffix}
+                        libMLIRParser.${suffix}
+                        libMLIRPass.${suffix}
+                        libMLIRQuantizerFxpMathConfig.${suffix}
+                        libMLIRQuantizerSupport.${suffix}
+                        libMLIRQuantizerTransforms.${suffix}
+                        libMLIRQuantOps.${suffix}
+                        libMLIRROCDLIR.${suffix}
+                        libMLIRSDBM.${suffix}
+                        libMLIRSPIRV.${suffix}
+                        libMLIRSPIRVSerialization.${suffix}
+                        libMLIRSPIRVTestPasses.${suffix}
+                        libMLIRSPIRVTransforms.${suffix}
+                        libMLIRStandardOps.${suffix}
+                        libMLIRStandardToLLVM.${suffix}
+                        libMLIRStandardToSPIRVTransforms.${suffix}
+                        libMLIRSupport.${suffix}
+                        libMLIRTargetLLVMIR.${suffix}
+                        libMLIRTargetLLVMIRModuleTranslation.${suffix}
+                        libMLIRTargetNVVMIR.${suffix}
+#                        libMLIRTargetROCDLIR.${suffix}
+#                        libMLIRTestDialect.${suffix}
+#                        libMLIRTestIR.${suffix}
+#                        libMLIRTestPass.${suffix}
+#                        libMLIRTestTransforms.${suffix}
+                        libMLIRTransforms.${suffix}
+                        libMLIRTransformUtils.${suffix}
+                        libMLIRTranslateClParser.${suffix}
+                        libMLIRTranslation.${suffix}
+                        libMLIRVectorOps.${suffix}
+                        libMLIRVectorToLLVM.${suffix}
+                        libMLIRVectorToLoops.${suffix}
+           )
 
     # XXX: This function is untested and will need adjustment.
     function(mlir_tablegen)
