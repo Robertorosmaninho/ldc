@@ -14,8 +14,6 @@
 
 #if LDC_MLIR_ENABLED
 
-#define LDC_MLIRSTATMENTS_H
-
 #include "dmd/statement.h"
 #include "dmd/statement.h"
 #include "dmd/expression.h"
@@ -78,8 +76,7 @@ public:
   void mlirGen(IfStatement *ifStatement);
   mlir::Value mlirGen(Statement *statement);
   mlir::Value mlirGen(ExpStatement *expStatement);
-  mlir::Value mlirGen(ForStatement *forStatement);
-  mlir::Value mlirGen(UnrolledLoopStatement *unrolledLoopStatement);
+  void mlirGen(ForStatement *forStatement);
   mlir::LogicalResult mlirGen(ReturnStatement *returnStatement);
   mlir::LogicalResult genStatements(FuncDeclaration *funcDeclaration);
   std::vector<mlir::Value> mlirGen(CompoundStatement *compoundStatement);

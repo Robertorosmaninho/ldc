@@ -14,19 +14,21 @@
 
 #if LDC_MLIR_ENABLED
 
-#define LDC_MLIRDECLARATION_H
-
 #include "dmd/statement.h"
 #include "dmd/declaration.h"
+#include "dmd/errors.h"
 #include "dmd/expression.h"
+#include "dmd/id.h"
 #include "dmd/init.h"
 #include "dmd/template.h"
 #include "dmd/visitor.h"
 
+#include "gen/irstate.h"
 #include "gen/logger.h"
 #include "gen/modules.h"
-#include "gen/irstate.h"
+#include "gen/pragma.h"
 #include "gen/MLIR/Dialect.h"
+#include "gen/MLIR/IrFunction.h"
 #include "gen/MLIR/MLIRGen.h"
 
 #include "mlir/Dialect/StandardOps/Ops.h"
@@ -74,7 +76,7 @@ private:
 
 public:
   MLIRDeclaration(IRState *irs, Module *m, mlir::MLIRContext &context,
-      mlir::OpBuilder builder_,
+      mlir::OpBuilder builder,
       llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
       llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
       unsigned &total, unsigned &miss);
@@ -83,13 +85,14 @@ public:
   mlir::LogicalResult mlirGen(StructDeclaration* structDeclaration);
   mlir::Value mlirGen(VarDeclaration* varDeclaration);
   mlir::Value mlirGen(Declaration* declaration);
-  mlir::DenseElementsAttr getConstantAttr(mlir::Value value);
   StructDeclaration* getStructFor(StructLiteralExp *structLiteralExp);
   std::pair<mlir::ArrayAttr, mlir::Type> getConstantAttr(StructDeclaration
   *structDeclaration = nullptr, StructLiteralExp *structLiteralExp = nullptr);
   mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
       mlir::Value rhs, StringRef lhs_name, StringRef rhs_name, int op,
       bool canSkipPostblitm, Type* t1, Type* t2);
+  mlir::Value DtoMLIRSymbolAddress(mlir::Location loc, Type* type,
+      Declaration* declaration);
   mlir::Type get_MLIRtype(Expression* expression, Type* type = nullptr);
 
   //Expression

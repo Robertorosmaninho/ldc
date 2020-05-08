@@ -70,7 +70,7 @@ string dtype(Record* rec, bool readOnlyMem)
 
 string attributes(ListInit* propertyList)
 {
-    string prop =
+    auto prop =
         propertyList->size()
         ? propertyList->getElementAsRecord(0)->getName() : "";
 
@@ -85,8 +85,8 @@ void processRecord(raw_ostream& os, Record& rec, string arch)
     if(!rec.getValue("GCCBuiltinName"))
         return;
 
-    string builtinName = rec.getValueAsString("GCCBuiltinName");
-    string name =  rec.getName();
+    auto builtinName = rec.getValueAsString("GCCBuiltinName");
+    string name =  string(rec.getName());
 
     if(name.substr(0, 4) != "int_" || name.find(arch) == string::npos)
         return;
@@ -96,7 +96,7 @@ void processRecord(raw_ostream& os, Record& rec, string arch)
     name = string("llvm.") + name;
 
     ListInit* propsList = rec.getValueAsListInit("IntrProperties");
-    string prop =
+    auto prop =
         propsList->size()
         ? propsList->getElementAsRecord(0)->getName() : "";
 

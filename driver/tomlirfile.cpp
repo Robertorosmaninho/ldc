@@ -80,7 +80,7 @@ void writeMLIRModule(Module *m, mlir::MLIRContext &mlirContext,
         llvm::SmallString<128> buffer(filename);
         llvm::sys::path::replace_extension(buffer,
                                            llvm::StringRef(ext.ptr, ext.length));
-        return buffer.str();
+        return buffer.c_str();
       };
 
   //Write MLIR
@@ -89,7 +89,7 @@ void writeMLIRModule(Module *m, mlir::MLIRContext &mlirContext,
     Logger::println("Writting MLIR to %s\n", llpath.c_str());
     std::error_code errinfo;
     llvm::raw_fd_ostream aos(llpath, errinfo, llvm::sys::fs::F_None);
-    if(aos.has_error()){
+    if (aos.has_error()) {
       error(Loc(), "Cannot write MLIR file '%s':%s", llpath.c_str(),
             errinfo.message().c_str());
       fatal();
@@ -104,17 +104,17 @@ void writeMLIRModule(Module *m, mlir::MLIRContext &mlirContext,
     //TODO:Needs to set a flag to lowering D->MLIR->Affine+std
     bool isLoweringToAffine = true;
     if(isLoweringToAffine){
-      pm.addPass(mlir::D::createLowerToStandardPass());
+      pm.addPass(mlir::D::createLowerToAffinePass());
       mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
       optPM.addPass(mlir::createCanonicalizerPass());
       optPM.addPass(mlir::createCSEPass());
 
       //TODO: Needs to set a flag to enaple opt
-      bool enableOpt = 1;
-      if (enableOpt) {
-        optPM.addPass(mlir::createLoopFusionPass());
-        optPM.addPass(mlir::createMemRefDataFlowOptPass());
-      }
+    //  bool enableOpt = 1;
+    //  if (enableOpt) {
+    //    optPM.addPass(mlir::createLoopFusionPass());
+    //    optPM.addPass(mlir::createMemRefDataFlowOptPass());
+    //  }
 
 
       if(mlir::failed(pm.run(*module))){
