@@ -476,6 +476,18 @@ struct CastOpLowering : public OpRewritePattern<D::CastOp> {
 };
 
 
+struct CallOpLowering : public OpRewritePattern<D::CallOp> {
+  using OpRewritePattern<D::CallOp>::OpRewritePattern;
+
+  PatternMatchResult matchAndRewrite(D::CallOp op,
+                                     PatternRewriter &rewriter) const final {
+
+    auto memRefType = convertTensorToMemRef(op.getType().cast<TensorType>());
+    rewriter.replaceOpWithNewOp<mlir::CallOp>(op, op.callee(), memRefType,
+                                              op.getOperands());
+    return matchSuccess();
+  }};
+
 //===----------------------------------------------------------------------===//
 // DToAffineLoweringPass
 //===----------------------------------------------------------------------===//
@@ -544,7 +556,7 @@ void DToAffineLoweringPass::runOnFunction() {
   SubOpLowering, SubFOpLowering, MulOpLowering, MulFOpLowering,
   DivSOpLowering, DivUOpLowering, DivFOpLowering, ModSOpLowering,
   ModUOpLowering, ModFOpLowering, AndOpLowering, OrOpLowering,
-  XorUOpLowering>(&getContext());
+  XorUOpLowering, CallOpLowering>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`

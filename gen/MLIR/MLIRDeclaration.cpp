@@ -616,15 +616,19 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp){
     operands.push_back(arg);
   }
   //Get the return type
-  mlir::Type ret = nullptr;
-  if(callExp->f->returns != nullptr)
-    if(ReturnStatement *returnStatement = *callExp->f->returns->tdata())
-      ret = get_MLIRtype(returnStatement->exp);
-
-  if(ret)
-    types.push_back(ret);
-  else
-    types.push_back(mlir::NoneType::get(&context));
+  auto Fd = callExp->f;
+  if (!Fd->returns->empty()) {
+    auto type = get_MLIRtype(nullptr, Fd->type);
+    TypeFunction *funcType = static_cast<TypeFunction *>(Fd->type);
+    auto ty = funcType->next->ty;
+    if (ty != Tvector && ty != Tarray && ty != Tsarray && ty != Taarray) {
+      auto dataType = mlir::RankedTensorType::get(1, type);
+      types.push_back(dataType);
+    } else {
+      auto tensorType = type.cast<mlir::TensorType>();
+      types.push_back(tensorType);
+    }
+  }
 
   llvm::ArrayRef<mlir::Type> ret_type(types);
   return builder.create<mlir::D::CallOp>(loc(callExp->loc), functionName,
@@ -1238,7 +1242,8 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp){
   if (type.isIntOrFloat()) {
     IF_LOG Logger::println("Undeclared VarExp: '%s' | '%u'", varExp->toChars(),
                            varExp->op);
-    auto dataAttribute = builder.getIntegerAttr(builder.getIntegerType(32), 0);
+    auto shapedType = mlir::RankedTensorType::get(1, builder.getIntegerType(32));
+    auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, 0);
     return builder.create<mlir::D::IntegerOp>(loc(varExp->loc), dataAttribute);
   } else if (varExp->type->ty == Tstruct) {
     if (StructLiteralExp *sle = varExp->isStructLiteralExp()) {
