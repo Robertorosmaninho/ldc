@@ -109,7 +109,7 @@ void MLIRStatements::mlirGen(IfStatement *ifStatement){
   unsigned if_total = 0, if_miss = 0;
   // Builing the object to get the Value for an expression
   MLIRDeclaration mlirDeclaration(irState,module, context, builder, symbolTable,
-                                  if_total, if_miss);
+                                  structMap, if_total, if_miss);
 
   // Marks if a new direct branch is needed. This happens when we need to
   // connect the end_if of an "else if" into the his successor end_if

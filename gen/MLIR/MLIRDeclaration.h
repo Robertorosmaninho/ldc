@@ -68,7 +68,7 @@ private:
 
   /// A mapping for named struct types to the underlying MLIR type and the
   /// original AST node.
-  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> structMap;
+  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap;
 
   /// Temporary flags to mesure the total amount of hits and misses on our
   /// translation through MLIR
@@ -82,12 +82,15 @@ public:
       unsigned &total, unsigned &miss);
   ~MLIRDeclaration();
 
-  mlir::LogicalResult mlirGen(StructDeclaration* structDeclaration);
-  mlir::Value mlirGen(VarDeclaration* varDeclaration);
+  mlir::DenseElementsAttr getConstantAttr(Expression *expression);
+  std::pair<mlir::ArrayAttr, mlir::Type>
+  getConstantAttr(StructLiteralExp *structLiteralExp);
+  llvm::Optional<size_t> getMemberIndex(Expression* expression);
+  StructDeclaration* getStructFor(Expression *expression);
   mlir::Value mlirGen(Declaration* declaration);
-  StructDeclaration* getStructFor(StructLiteralExp *structLiteralExp);
-  std::pair<mlir::ArrayAttr, mlir::Type> getConstantAttr(StructDeclaration
-  *structDeclaration = nullptr, StructLiteralExp *structLiteralExp = nullptr);
+  mlir::LogicalResult mlirGen(StructDeclaration* structDeclaration, bool generated);
+  mlir::Value mlirGen(VarDeclaration* varDeclaration);
+
   mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
       mlir::Value rhs, StringRef lhs_name, StringRef rhs_name, int op,
       bool canSkipPostblitm, Type* t1, Type* t2);
@@ -105,6 +108,7 @@ public:
   mlir::Value mlirGen(ConstructExp *constructExp);
   mlir::Value mlirGen(DeclarationExp* declarationExp);
   mlir::Value mlirGen(DivExp *divExp = nullptr, DivAssignExp *divAssignExp = nullptr);
+  mlir::Value mlirGen(DotVarExp *dotVarExp);
   mlir::Value mlirGen(Expression *expression, int func);
   mlir::Value mlirGen(Expression *expression, mlir::Block *block = nullptr);
   mlir::Value mlirGen(IntegerExp *integerExp);

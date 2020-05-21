@@ -59,8 +59,7 @@ public:
     m->ir->resetAll();
 
     MLIRDeclaration declaration(irs, m, context, builder, symbolTable,
-                                                  symbolTable,structMap,
-                                                  total, miss);
+                                structMap, total, miss);
 
     for(unsigned long k = 0; k < m->members->length; k++) {
       total++;
@@ -76,20 +75,8 @@ public:
           return nullptr;
         theModule.push_back(func);
       } else if (StructDeclaration *structDecl = dsym->isStructDeclaration()){
-        if(failed(declaration.mlirGen(structDecl)))
-          return nullptr;
-        IF_LOG Logger::println("MLIRCodeGen - StructLiteralExp: '%s'",
-                               structDecl->toChars());
-        llvm::StringRef structName;
-        if (auto *decl = structDecl){
-          structName = decl->toChars();
-        } else {
-          if(!structDecl->members)
-            return nullptr;
-          for(auto var : *structDecl->members)
-            Logger::println("Expression: '%s'", var->toChars());
-
-        }
+        if(failed(declaration.mlirGen(structDecl, 0)))
+          fatal();
 
       } else if (dsym->isInstantiated()) {
         IF_LOG Logger::println("isTemplateInstance: '%s'",
@@ -241,7 +228,7 @@ private:
 
     // Initialize the object to be the "visitor"
     MLIRStatements genStmt(irs, irs->dmodule, context, builder,
-        symbolTable, total, miss);
+        symbolTable, structMap, total, miss);
 
     //Setting arguments of a given function
     unsigned long size = 0;
@@ -331,7 +318,7 @@ private:
     } else {
         miss++;
         MLIRDeclaration declaration(irs, nullptr, context, builder,
-            symbolTable, total, miss);
+            symbolTable, structMap, total, miss);
         mlir::Value value = declaration.mlirGen(varDeclarations->front());
         return value.getType();
     }

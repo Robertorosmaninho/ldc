@@ -16,10 +16,140 @@ MLIRDeclaration::MLIRDeclaration(IRState *irs, Module *m,
     llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
     llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
     unsigned &total, unsigned &miss) : irState(irs), module(m), context(context),
-    builder(builder_), symbolTable(symbolTable), structMap(structMap),
+    builder(builder), symbolTable(symbolTable), structMap(structMap),
     _total(total), _miss(miss){} //Constructor
 
 MLIRDeclaration::~MLIRDeclaration() = default;
+
+mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(Expression *exp) {
+  // The type of this attribute is tensor of 64-bit floating-point with no
+  // shape.
+  auto type = get_MLIRtype(exp);
+  auto dataType = mlir::RankedTensorType::get(1, type);
+
+  // This is the actual attribute that holds the list of values for this
+  // tensor literal.
+  if (auto number = exp->isIntegerExp())
+    return mlir::DenseElementsAttr::get(dataType,
+                                        llvm::makeArrayRef(number->value));
+  else if (auto real = exp->isRealExp())
+    return mlir::DenseElementsAttr::get(
+        dataType, llvm::makeArrayRef((double)real->value));
+}
+
+std::pair<mlir::ArrayAttr, mlir::Type>
+MLIRDeclaration::getConstantAttr(StructLiteralExp *lit) {
+
+  /// Emit a constant for a struct literal. It will be emitted as an array of
+  /// other literals in an Attribute attached to a `toy.struct_constant`
+  /// operation. This function returns the generated constant, along with the
+  /// corresponding struct type.
+  std::vector<mlir::Attribute> attrElements;
+  std::vector<mlir::Type> typeElements;
+
+  IF_LOG Logger::println("MLIRCodeGen - Getting ConstantAttr for Struct: "
+                         "'%s'",
+                         lit->toChars());
+
+  for (auto &var : *lit->elements) {
+    if (auto number = var->isIntegerExp()) {
+      attrElements.push_back(getConstantAttr(number));
+      mlir::Type type = get_MLIRtype(number);
+      typeElements.push_back(mlir::RankedTensorType::get(1, type));
+    } else if (auto real = var->isRealExp()) {
+      mlir::Type type = get_MLIRtype(real);
+      attrElements.push_back(getConstantAttr(real));
+      typeElements.push_back(mlir::RankedTensorType::get(1, type));
+    } else if (var->type->ty == Tsarray) {
+      mlir::Value value = mlirGen(var);
+      attrElements.push_back(value.getDefiningOp()->getAttr("value"));
+      typeElements.push_back(value.getType());
+    } else {
+      Logger::println("Unable to attach '%s' of type '%s' to '%s'",
+                      var->toChars(), var->type->toChars(), lit->toChars());
+      _miss++;
+      fatal();
+    }
+  }
+
+  mlir::ArrayAttr dataAttr = builder.getArrayAttr(attrElements);
+  mlir::Type dataType = mlir::D::StructType::get(typeElements);
+  return std::make_pair(dataAttr, dataType);
+}
+
+llvm::Optional<size_t> MLIRDeclaration::getMemberIndex(Expression *expression) {
+  assert(expression->isDotVarExp());
+
+  // Lookup the struct node for the LHS.
+  auto dotVarExp = expression->isDotVarExp();
+  auto Struct = static_cast<StructLiteralExp *>(dotVarExp->e1);
+
+  Logger::println("Getting member index from '%s'", Struct->toChars());
+  StructDeclaration *Sd = getStructFor(Struct);
+
+  if (!Sd)
+    return llvm::None;
+
+  // Get the name from the index.
+  auto var = dotVarExp->var;
+  if (!var)
+    return llvm::None;
+
+  auto members = Sd->members;
+  std::vector<Dsymbol *> aux;
+  for (auto dsymbol : *members)
+    aux.push_back(dsymbol);
+
+  llvm::ArrayRef<Dsymbol *> structVars(aux);
+  auto it = llvm::find_if(
+      structVars, [&](auto &Var) { return Var->toChars() == var->toChars(); });
+
+  if (it == structVars.end())
+    return llvm::None;
+  return it - structVars.begin();
+}
+
+StructDeclaration* MLIRDeclaration::getStructFor(Expression *expression) {
+  IF_LOG Logger::println("MLIRCodeGen - GetStructFor: '%s'",
+                         expression->toChars());
+  llvm::StringRef structName;
+  if (auto *lit = static_cast<StructLiteralExp*>(expression)){
+    auto varIt = symbolTable.lookup(lit->toChars());
+    if(!varIt)
+      return nullptr;
+    structName = expression->type->toChars();
+  } else if (auto *acess = static_cast<DotVarExp*>(expression)) {
+
+    // The name being accessed should be in var.
+    auto *name = acess->var;
+    if (!name)
+      return nullptr;
+    auto *parentStruct = getStructFor(acess->e1);
+    if (!parentStruct)
+      return nullptr;
+
+    // Get the element within the struct corresponding to the name.
+    Dsymbol *decl = nullptr;
+    for (auto &var : *parentStruct->members) {
+      if (var->toChars() == name->toChars()) {
+        decl = var;
+        break;
+      }
+    }
+    if (!decl)
+      return nullptr;
+    structName = decl->getType()->toChars();
+  }
+
+  if (structName.empty())
+    return nullptr;
+
+  // If the struct name was valid, check for an entry in the struct map.
+  auto structIt = structMap.find(structName);
+  if (structIt == structMap.end())
+    return nullptr;
+  return structIt->second.second;
+}
 
 mlir::Value MLIRDeclaration::mlirGen(Declaration *declaration){
   IF_LOG Logger::println("MLIRCodeGen - Declaration: '%s'",
@@ -27,9 +157,9 @@ mlir::Value MLIRDeclaration::mlirGen(Declaration *declaration){
   LOG_SCOPE
 
   if(StructDeclaration *structDeclaration = declaration->isStructDeclaration()) {
-    if (failed(mlirGen(structDeclaration)))
+    if (failed(mlirGen(structDeclaration, 0)))
       return nullptr;
-  } else if(auto varDeclaration = declaration->isVarDeclaration())
+  } else if(auto varDeclaration = declaration->isVarDeclaration()) {
     return mlirGen(varDeclaration);
   } else {
     IF_LOG Logger::println("Unable to recoganize Declaration: '%s'",
@@ -39,67 +169,57 @@ mlir::Value MLIRDeclaration::mlirGen(Declaration *declaration){
   }
 }
 
-mlir::LogicalResult MLIRDeclaration::mlirGen(StructDeclaration
-*structDeclaration) {
+mlir::LogicalResult
+MLIRDeclaration::mlirGen(StructDeclaration *structDeclaration, bool generated) {
   IF_LOG Logger::println("MLIRCodeGen - StructDeclaration: '%s'",
       structDeclaration->toChars());
 
-  if(structMap.count(structDeclaration->toChars()))
-    return mlir::emitError(loc(structDeclaration->loc)) << "error: struct "
-       "type with name '" << structDeclaration->toChars() << "' already exists";
+  if (structMap.count(structDeclaration->toChars()) && !generated)
+    return mlir::emitError(loc(structDeclaration->loc))
+           << "error: struct "
+              "type with name '"
+           << structDeclaration->toChars() << "' already exists";
 
   auto variables = structDeclaration->members;
   std::vector<mlir::Type> elementTypes;
+  std::vector<mlir::Attribute> attrElements;
   elementTypes.reserve(variables->size());
+  attrElements.reserve(variables->size());
   for (auto variable : *variables){
     Logger::println("Getting Type of '%s'", variable->toChars());
     if(variable->hasStaticCtorOrDtor())
       return mlir::emitError(loc(structDeclaration->loc)) << "error: "
          "variables within a struct definition must not have initializers";
 
-    mlir::Type type = get_MLIRtype(nullptr,variable->getType());
+    mlir::Type type = get_MLIRtype(nullptr, variable->getType());
+    if (!type.template isa<mlir::RankedTensorType>())
+      type = mlir::RankedTensorType::get(1, type);
+
     if(!type)
       return mlir::failure();
     elementTypes.push_back(type);
   }
 
-  structMap.try_emplace(structDeclaration->toChars(),
-      mlir::D::StructType::get(elementTypes), structDeclaration);
-  return mlir::success();
-}
-
-StructDeclaration* MLIRDeclaration::getStructFor(StructLiteralExp
-                                                 *structLiteralExp){
-  IF_LOG Logger::println("MLIRCodeGen - GetStructFor: '%s'",
-      structLiteralExp->toChars());
-  llvm::StringRef structName;
-  if (auto *decl = structLiteralExp->sd){
-    auto varIt = symbolTable.lookup(decl->toChars());
-    if(!varIt)
-      return nullptr;
-    structName = decl->toChars();
-  } else {
-    if(!structLiteralExp->elements)
-      return nullptr;
-    for(auto var : *structLiteralExp->elements)
-      Logger::println("Expression: '%s'", var->toChars());
-
+  if (!generated) {
+    structMap.try_emplace(structDeclaration->toChars(),
+                          mlir::D::StructType::get(elementTypes), structDeclaration);
+    return mlir::success();
   }
-return nullptr;
-}
 
-mlir::Value MLIRDeclaration::mlirGen(StructLiteralExp* structLiteralExp) {
-  IF_LOG Logger::println("MLIRCodeGen - StructLiteralExp: '%s'",
-                         structLiteralExp->toChars());
+  if (symbolTable.lookup(structDeclaration->toChars()))
+    return mlir::success();
 
-  mlir::ArrayAttr dataAttr;
-  mlir::Type dataType;
-  std::tie(dataAttr, dataType) = getConstantAttr(nullptr, structLiteralExp);
+  for (auto varDecl : structDeclaration->fields) {
+    auto var = getConstantAttr(varDecl->_init->isExpInitializer()->exp);
+    attrElements.push_back(var);
+  }
+  mlir::ArrayAttr dataAttr = builder.getArrayAttr(attrElements);
+  mlir::Value Struct = builder.create<mlir::D::StructConstantOp>(
+      loc(structDeclaration->loc), mlir::D::StructType::get(elementTypes),
+      dataAttr);
+  declare(structDeclaration->toChars(), Struct);
 
-  // Build the MLIR op `toy.struct_constant`. This invokes the
-  // `StructConstantOp::build` method.
-  return builder.create<mlir::D::StructConstantOp>(loc(structLiteralExp->loc),
-                                                   dataType, dataAttr);
+  return mlir::success();
 }
 
 mlir::Value MLIRDeclaration::mlirGen(VarDeclaration *vd){
@@ -144,56 +264,6 @@ mlir::Value MLIRDeclaration::mlirGen(VarDeclaration *vd){
   }
   _miss++;
   return nullptr;
-}
-
-mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(mlir::Value value) {
-  // The type of this attribute is tensor of 64-bit floating-point with no
-  // shape.
-  auto dataType = mlir::RankedTensorType::get({}, value.getType());
-
-  // This is the actual attribute that holds the list of values for this
-  // tensor literal.
-  return mlir::DenseElementsAttr::get(dataType, &value);
-}
-
-std::pair<mlir::ArrayAttr, mlir::Type> MLIRDeclaration::getConstantAttr(
-                                StructDeclaration *decl, StructLiteralExp *lit){
-
-/// Emit a constant for a struct literal. It will be emitted as an array of
-/// other literals in an Attribute attached to a `toy.struct_constant`
-/// operation. This function returns the generated constant, along with the
-/// corresponding struct type.
-  std::vector<mlir::Attribute> attrElements;
-  std::vector<mlir::Type> typeElements;
-
-  if(decl != nullptr && lit == nullptr){
-    IF_LOG Logger::println("MLIRCodeGen - Getting ConstantAttr for Struct: "
-                           "'%s'", decl->toChars());
-
-    for(auto &var : *decl->members) {
-      Logger::println("Var: '%s'", var->toChars());
-    }
-  }else {
-    IF_LOG Logger::println("MLIRCodeGen - Getting ConstantAttr for Struct: "
-                           "'%s'", lit->toChars());
-
-    for (auto &var : *lit->elements) {
-      if (auto *number = var->isIntegerExp()) {
-        auto value = mlirGen(number);
-        attrElements.push_back(getConstantAttr(value));
-        typeElements.push_back(value.getType());
-     } else if (auto *real = var->isRealExp()) {
-        auto value = mlirGen(real);
-        attrElements.push_back(getConstantAttr(value));
-        typeElements.push_back(value.getType());
-      }
-
-    }
-  }
-
-  mlir::ArrayAttr dataAttr = builder.getArrayAttr(attrElements);
-  mlir::Type dataType = mlir::D::StructType::get(typeElements);
-  return std::make_pair(dataAttr, dataType);
 }
 
 mlir::Value MLIRDeclaration::DtoAssignMLIR(mlir::Location Loc,
@@ -446,11 +516,30 @@ mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp){
 
   //check if it is a declared variable
  mlir::Value lhs = nullptr;
-  lhs = mlirGen(assignExp->e1->isVarExp());
+ mlir::Value rhs = nullptr;
+
+ if (assignExp->e1->isVarExp() || assignExp->e1->isDotVarExp())
+  lhs = mlirGen(assignExp->e1);
+ else {
+   Logger::println("assign e1: '%s' of type: '%s' and op : '%d'",
+       assignExp->e1->toChars(),
+       assignExp->e1->type->toChars(),
+       assignExp->e1->op);
+
+   _miss++;
+   fatal();
+ }
 
   if(lhs != nullptr) {
-    lhs = mlirGen(assignExp->e2);
-    return lhs;
+    rhs = mlirGen(assignExp->e2);
+    if (failed(declare(assignExp->e1->toChars(), rhs))) {
+      //Replace the value on symbol table
+      symbolTable.insert(assignExp->e1->toChars(), rhs);
+    }
+    Logger::println("DtoMLIRAssign()");
+    Logger::println("lhs: %s", assignExp->e1->toChars());
+    Logger::println("rhs: %s", assignExp->e2->toChars());
+    return rhs;
   }else{
     _miss++;
     IF_LOG Logger::println("Failed to assign '%s' to '%s'",
@@ -473,6 +562,16 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp){
   VarDeclaration *delayedDtorVar = nullptr;
   Expression *delayedDtorExp = nullptr;
 
+  // Check if we are about to construct a just declared temporary. DMD
+  // unfortunately rewrites this as
+  //   MyStruct(myArgs) => (MyStruct tmp; tmp).this(myArgs),
+  // which would lead us to invoke the dtor even if the ctor throws. To
+  // work around this, we hold on to the cleanup and push it only after
+  // making the function call.
+  //
+  // The correct fix for this (DMD issue 13095) would have been to adapt
+  // the AST, but we are stuck with this as DMD also patched over it with
+  // a similar hack.
   if (callExp->f && callExp->f->isCtorDeclaration()) {
     if (auto dve = callExp->e1->isDotVarExp())
       if (auto ce = dve->e1->isCommaExp())
@@ -490,8 +589,15 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp){
   // get the calle
   mlir::Value fnval;
   if (callExp->directcall) {
-    //Todo
-    auto dve = callExp->e1->isDotExp();
+    // TODO: Do this as an extra parameter to DotVarExp implementation.
+    auto dve = callExp->e1->isDotVarExp();
+    assert(dve);
+    FuncDeclaration *fdecl = dve->var->isFuncDeclaration();
+    assert(fdecl);
+    MLIRFunction mlirFunc(fdecl, context, builder,
+        symbolTable, _total, _miss);
+    mlirFunc.DtoMLIRDeclareFunction(fdecl); //TODO: This does not work yet.
+    //TODO: Create DtoRVal and DtoLVal
   } else {
     fnval = mlirGen(callExp->e1);
   }
@@ -573,40 +679,20 @@ mlir::Value MLIRDeclaration::mlirGen(CastExp *castExp){
   auto singletype = get_MLIRtype(castExp);
   auto type = mlir::RankedTensorType::get(size,singletype);
 
-  /*bool ResultIsInteger = result.getType().isInteger(1) ||
-      result.getType().isInteger(8) || result.getType().isInteger(16) ||
-      result.getType().isInteger(32) || result.getType().isInteger(64);
-  bool TypeIsFloat = singletype.isF16() || singletype.isF32() || singletype.isF64();
-
-  //Extennd f16 -> f32 and f16, f32 -> f64
-  if (((result.getType().isF16() || result.getType().isF32()) && singletype.isF64())||
-      (result.getType().isF16() && singletype.isF32()))
-    return builder.create<mlir::FPExtOp>(location, result, type);
-  // Cast to smaller type f64 -> f32; f64 -> f16; f32-> f16
-  else if (((result.getType().isF64() || result.getType().isF32()) && singletype.isF16())||
-           (result.getType().isF64() && singletype.isF32()))
-    return builder.create<mlir::FPTruncOp>(location, result, type);
-  // Extend i1 -> i8; i1, i8 -> i16; i1, i8, i16 -> i32; i1, i8, i16, i32 -> i64
-  else if(SizeIsGreaterThan(result.getType(), singletype))
-    return builder.create<mlir::SignExtendIOp>(location, result, type);
-  // Truncate i64->i32, i16, i8, i1; i32 -> i16, i8, i1; i16 -> i8, i1; i8 -> i1
-  else if(!SizeIsGreaterThan(result.getType(), singletype))
-    return builder.create<mlir::D::TruncateOp>(location, result, type);
-  // Cast Integer to Float
-  else if(TypeIsFloat && ResultIsInteger)
-    return builder.create<mlir::SIToFPOp>(location, result, type);
-  else*/
     return builder.create<mlir::D::CastOp>(location, type, result);
 }
 
 mlir::Value MLIRDeclaration::mlirGen(ConstructExp *constructExp){
-  IF_LOG Logger::println("MLIRCodeGen - ConstructExp: '%s'", constructExp->toChars());
+  IF_LOG Logger::println("MLIRCodeGen - ConstructExp: '%s'",
+                         constructExp->toChars());
   LOG_SCOPE
   _total++;
   //mlir::Value *lhs = mlirGen(constructExp->e1);
   mlir::Value rhs = mlirGen(constructExp->e2);
 
-  if (failed(declare(constructExp->e1->toChars(), rhs))){
+  Logger::println("Declaring '%s' = '%s' on SymbolTable",
+                  constructExp->e1->toChars(), constructExp->e2->toChars());
+  if (failed(declare(constructExp->e1->toChars(), rhs))) {
     _miss++;
     return nullptr;
   }
@@ -622,7 +708,7 @@ mlir::Value MLIRDeclaration::mlirGen(DeclarationExp *decl_exp){
   if (VarDeclaration *vd = dsym->isVarDeclaration())
     return mlirGen(vd);
   else if(StructDeclaration *structDeclaration = dsym->isStructDeclaration())
-    if(failed(mlirGen(structDeclaration)))
+    if(failed(mlirGen(structDeclaration, 0)))
       return nullptr;
 
   IF_LOG Logger::println("Unable to recoganize DeclarationExp: '%s'",
@@ -683,6 +769,72 @@ mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp, DivAssignExp *divAssignExp)
   }
 
   return result;
+}
+
+mlir::Value MLIRDeclaration::mlirGen(DotVarExp *dotVarExp) {
+  Logger::println("DotVarExp::toElem: %s @ %s", dotVarExp->toChars(),
+                  dotVarExp->type->toChars());
+
+  auto location = loc(dotVarExp->loc);
+  Type *e1type = dotVarExp->e1->type->toBasetype();
+
+  if (VarDeclaration *vd = dotVarExp->var->isVarDeclaration()) {
+    //  LLValue *arrptr;
+    // indexing struct pointer
+    if (e1type->ty == Tpointer) {
+      assert(e1type->nextOf()->ty == Tstruct);
+      Logger::println("dotVarExp is VarDeclaration");
+      // TypeStruct *ts = static_cast<TypeStruct *>(e1type->nextOf());
+      // arrptr = DtoIndexAggregate(DtoRVal(l), ts->sym, vd);
+    }
+      // indexing normal struct
+    else if (e1type->ty == Tstruct) {
+      auto *ts = static_cast<TypeStruct *>(e1type);
+      llvm::Optional<size_t> accessIndex = getMemberIndex(dotVarExp);
+      if (!accessIndex) {
+        emitError(location, "invalid access into struct expression");
+        return nullptr;
+      }
+      auto lhs = mlirGen(dotVarExp->e1);
+      return builder.create<mlir::D::StructAccessOp>(location, lhs,
+                                                     *accessIndex);
+    }
+      // indexing class
+    else if (e1type->ty == Tclass) {
+      TypeClass *tc = static_cast<TypeClass *>(e1type);
+      //    arrptr = DtoIndexAggregate(DtoRVal(l), tc->sym, vd);
+    } else {
+      llvm_unreachable("Unknown DotVarExp type for VarDeclaration.");
+    }
+
+    //  Logger::cout() << "mem: " << *arrptr << '\n';
+    // result = new DLValue(e->type, DtoBitCast(arrptr, DtoPtrToType(e->type)));
+    /*} else if (FuncDeclaration *fdecl = e->var->isFuncDeclaration()) {
+      DtoResolveFunction(fdecl);
+
+      // This is a bit more convoluted than it would need to be, because it
+      // has to take templated interface methods into account, for which
+      // isFinalFunc is not necessarily true.
+      // Also, private/package methods are always non-virtual.
+      const bool nonFinal = !fdecl->isFinalFunc() &&
+                            (fdecl->isAbstract() || fdecl->isVirtual()) &&
+                            fdecl->prot().kind != Prot::private_ &&
+                            fdecl->prot().kind != Prot::package_;
+
+      // Get the actual function value to call.
+      LLValue *funcval = nullptr;
+      if (nonFinal) {
+        funcval = DtoVirtualFunctionPointer(l, fdecl, e->toChars());
+      } else {
+        funcval = DtoCallee(fdecl);
+      }
+      assert(funcval);
+
+      LLValue *vthis = (DtoIsInMemoryOnly(l->type) ? DtoLVal(l) : DtoRVal(l));
+      result = new DFuncValue(fdecl, funcval, vthis);*/
+  } else {
+    llvm_unreachable("Unknown target for VarDeclaration.");
+  }
 }
 
 mlir::Value MLIRDeclaration::mlirGen(Expression *expression, int func){
@@ -780,10 +932,11 @@ mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp){
   } else if (basetype->ty == Tint128 || basetype->ty == Tuns128) {
     shapedType = mlir::RankedTensorType::get(1, builder.getIntegerType(128));
     dataAttribute = mlir::DenseElementsAttr::get(shapedType, (dint));
+  } else {
+    _miss++;
+    fatal();
   }
-  auto op =  builder.create<mlir::D::IntegerOp>(location, dataAttribute);
-  return op;
-  //return builder.create<mlir::D::IntegerOp>(location, dataAttribute).getResult();
+  return builder.create<mlir::D::IntegerOp>(location, dataAttribute);
 }
 
 mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp, MinAssignExp *minAssignExp) {
@@ -1038,6 +1191,20 @@ mlir::Value MLIRDeclaration::mlirGen(StringExp *stringExp){
   return builder.createOperation(result)->getResult(0);
 }
 
+mlir::Value MLIRDeclaration::mlirGen(StructLiteralExp* structLiteralExp) {
+  IF_LOG Logger::println("MLIRCodeGen - StructLiteralExp: '%s'",
+                         structLiteralExp->toChars());
+
+  mlir::ArrayAttr dataAttr;
+  mlir::Type dataType;
+  std::tie(dataAttr, dataType) = getConstantAttr(structLiteralExp);
+
+  // Build the MLIR op `toy.struct_constant`. This invokes the
+  // `StructConstantOp::build` method.
+  return builder.create<mlir::D::StructConstantOp>(loc(structLiteralExp->loc),
+                                                   dataType, dataAttr);
+}
+
 mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp){
   _total++;
   IF_LOG Logger::println("MLIRCodeGen - VarExp: '%s'", varExp->toChars());
@@ -1067,12 +1234,25 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp){
     //TODO: return toElem(em->value(), p) -> Expression, bool
   }
 
-  mlir::Type type = get_MLIRtype(nullptr, varExp->type);
+  mlir::Type type = get_MLIRtype(varExp, varExp->type);
   if (type.isIntOrFloat()) {
     IF_LOG Logger::println("Undeclared VarExp: '%s' | '%u'", varExp->toChars(),
                            varExp->op);
     auto dataAttribute = builder.getIntegerAttr(builder.getIntegerType(32), 0);
     return builder.create<mlir::D::IntegerOp>(loc(varExp->loc), dataAttribute);
+  } else if (varExp->type->ty == Tstruct) {
+    if (StructLiteralExp *sle = varExp->isStructLiteralExp()) {
+      return mlirGen(sle);
+    }
+
+    auto structDecl = structMap.lookup(varExp->var->toChars());
+    if(!structDecl.second)
+      return nullptr;
+
+    if(!symbolTable.lookup(varExp->var->toChars()))
+      mlirGen(structDecl.second, 1);
+
+    return symbolTable.lookup(varExp->var->toChars());
   }
 
   return DtoMLIRSymbolAddress(loc(varExp->loc), varExp->type, varExp->var);
@@ -1304,23 +1484,15 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, mlir::Block* block)
     return mlirGen(expression->isOrExp(),expression->isOrAssignExp());
   else if (expression->isXorExp() || expression->isXorAssignExp())
     return mlirGen(expression->isXorExp(),expression->isXorAssignExp());
-  else if(expression->isStructLiteralExp() || expression->isBlitExp()){
-    Logger::println(" ----> PANIC: STRUCT: '%s'", expression->toChars());
-    if(BlitExp* blit = expression->isBlitExp()){
-      Logger::println(" ----> PANIC: Blit: '%s'", blit->toChars());
-      Logger::println(" ----> PANIC: BLIT->E1: '%s'", blit->e1->toChars());
-        mlirGen(blit->e1);
-      Logger::println(" ----> PANIC: BLIT->E2: '%s'", blit->e2->toChars());
-        mlirGen(blit->e2);
-    }else {
-      Logger::println(" ----> PANIC: STRUCTLiteral: '%s'", expression->toChars
-      ());
-    }
-   // mlirGen(expression->isStructLiteralExp()->sd);
-    //getStructFor(expression->isStructLiteralExp());
-    //mlirGen(expression->isStructLiteralExp());
+  else if(expression->isBlitExp()) {
+    auto Struct = mlirGen(expression->isBlitExp()->e2);
+    declare(expression->isBlitExp()->e1->toChars(), Struct);
+    return Struct;
+  } else if (expression->isStructLiteralExp()){
+      return mlirGen(expression->isStructLiteralExp());
+  } else if (DotVarExp *dotVarExp = expression->isDotVarExp()){
+    return mlirGen(dotVarExp);
   }
-
 
   _miss++;
   IF_LOG Logger::println("Unable to recoganize the Expression: '%s' : '%u': "
@@ -1363,16 +1535,26 @@ mlir::Type MLIRDeclaration::get_MLIRtype(Expression* expression, Type* type){
       return builder.getF64Type();
     } else if (basetype->ty == Tfloat80) {
       _miss++;     //TODO: Build F80 type on DDialect
-    } else if (basetype->ty == Tvector) {
-        mlir::TensorType tensor;
-        return tensor;
+    } else if (basetype->ty == Tvector || basetype->ty == Tarray ||
+               basetype->ty == Taarray) {
+      mlir::UnrankedTensorType tensor;
+      return tensor;
+    } else if (basetype->ty == Tsarray) {
+      auto size = basetype->isTypeSArray()->dim->toInteger();
+      return mlir::RankedTensorType::get(
+          size, get_MLIRtype(nullptr, type->isTypeSArray()->next));
+    } else if (basetype->ty == Tfunction) {
+      TypeFunction *typeFunction = static_cast<TypeFunction *>(basetype);
+      return get_MLIRtype(nullptr, typeFunction->next);
+    } else if (basetype->ty == Tstruct) {
+      auto varIt = structMap.lookup(basetype->toChars());
+      if (!varIt.first)
+        fatal();
+      return structMap.lookup(basetype->toChars()).first;
     } else {
         _miss++;
-        MLIRDeclaration *declaration = new MLIRDeclaration(irState, nullptr,
-                                                           context, builder,
-                                                           symbolTable,
-                                                           structMap, _total,
-                                                           _miss);
+        MLIRDeclaration declaration(irState, nullptr, context, builder,
+                                    symbolTable, structMap, _total, _miss);
         mlir::Value value = declaration.mlirGen(expression);
         return value.getType();
     }

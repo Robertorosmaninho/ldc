@@ -59,7 +59,7 @@ private:
 
   /// A mapping for named struct types to the underlying MLIR type and the
   /// original AST node.
-  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> structMap;
+  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap;
 
   ///Class to deal with all declarations.
   MLIRDeclaration declaration;

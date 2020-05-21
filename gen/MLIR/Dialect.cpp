@@ -28,11 +28,11 @@ using namespace mlir::D;
 /// point of registration of custom types and operations for the dialect.
 DDialect::DDialect(mlir::MLIRContext *context) : mlir::Dialect("D",
         context) {
-  addTypes<StructType>();
   addOperations<
 #define GET_OP_LIST
 #include "Ops.cpp.inc"
   >();
+  addTypes<StructType>();
 }
 
 mlir::Operation *DDialect::materializeConstant(mlir::OpBuilder &builder,
@@ -56,10 +56,10 @@ static mlir::LogicalResult verifyConstantForType(mlir::Type type,
                                                  mlir::Operation *op) {
   if (type.isa<mlir::TensorType>()) {
     // Check that the value is a elements attribute.
-    auto attrValue = opaqueValue.dyn_cast<mlir::DenseFPElementsAttr>();
+    auto attrValue = opaqueValue.dyn_cast<mlir::DenseElementsAttr>();
     if (!attrValue)
       return op->emitError("constant of TensorType must be initialized by "
-                           "a DenseFPElementsAttr, got ")
+                           "a DenseElementsAttr, got ")
           << opaqueValue;
 
     // If the return type of the constant is not an unranked tensor, the shape
@@ -108,7 +108,7 @@ static mlir::LogicalResult verifyConstantForType(mlir::Type type,
 
 
 static mlir::LogicalResult verify(StructConstantOp op) {
-  return verifyConstantForType(op.getResult()->getType(), op.value(), op);
+  return verifyConstantForType(op.getResult().getType(), op.value(), op);
 }
 
 
@@ -118,7 +118,7 @@ static mlir::LogicalResult verify(StructConstantOp op) {
 void StructAccessOp::build(mlir::Builder *b, mlir::OperationState &state,
                            mlir::Value input, size_t index) {
   // Extract the result type from the input type.
-  StructType structTy = input->getType().cast<StructType>();
+  StructType structTy = input.getType().cast<StructType>();
   assert(index < structTy.getNumElementTypes());
   mlir::Type resultType = structTy.getElementTypes()[index];
 
@@ -127,12 +127,12 @@ void StructAccessOp::build(mlir::Builder *b, mlir::OperationState &state,
 }
 
 static mlir::LogicalResult verify(StructAccessOp op) {
-  StructType structTy = op.input()->getType().cast<StructType>();
+  StructType structTy = op.input().getType().cast<StructType>();
   size_t index = op.index().getZExtValue();
   if (index >= structTy.getNumElementTypes())
     return op.emitOpError()
         << "index should be within the range of the input struct type";
-  mlir::Type resultType = op.getResult()->getType();
+  mlir::Type resultType = op.getResult().getType();
   if (resultType != structTy.getElementTypes()[index])
     return op.emitOpError() << "must have the same result type as the struct "
                                "element referred to by the index";
@@ -275,26 +275,7 @@ void DDialect::printType(mlir::Type type,
 }
 
 //===----------------------------------------------------------------------===//
-// AddOp
-
-void D::AddOp::build(mlir::Builder *b, mlir::OperationState &state,
-                     mlir::Value lhs, mlir::Value rhs) {
-  if(lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(mlir::NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-
-void D::AddFOp::build(mlir::Builder *b, mlir::OperationState &state,
-                      mlir::Value lhs, mlir::Value rhs) {
-  if(lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(mlir::NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
+// Dialect Ops
 
 void D::SubOp::build(mlir::Builder *b, mlir::OperationState &state,
                   mlir::Value lhs, mlir::Value rhs) {
@@ -422,9 +403,6 @@ void D::CallOp::build(mlir::Builder *b, mlir::OperationState &state,
   state.addAttribute("callee", b->getSymbolRefAttr(callee));
 }
 
-/// Build a constant operation.
-/// The builder is passed as an argument, so is the state that this method is
-/// expected to fill in order to build the operation.
 void D::IntegerOp::build(mlir::Builder *builder, mlir::OperationState &state,
                       mlir::Type type, int value, int size = 0) {
   if(type.isInteger(size)){
