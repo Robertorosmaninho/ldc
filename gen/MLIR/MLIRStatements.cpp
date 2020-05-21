@@ -203,7 +203,6 @@ mlir::LogicalResult MLIRStatements::mlirGen(ReturnStatement *returnStatement){
     auto expr = declaration.mlirGen(returnStatement->exp, builder.getInsertionBlock());
     if(!expr)
       return mlir::failure();
-    builder.setInsertionPointToEnd(expr.getDefiningOp()->getBlock());
     auto returnOp = builder.create<mlir::ReturnOp>(location, mlir::ValueRange(expr));
 
     //Assuming that the function only returns one value

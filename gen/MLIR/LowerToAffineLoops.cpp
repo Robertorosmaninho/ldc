@@ -490,6 +490,35 @@ namespace {
 } // end anonymous namespace.
 
 void DToAffineLoweringPass::runOnFunction() {
+  auto function = getFunction();
+
+  // The types of arguments on the entryBlock must mach with the types of each
+  // argument on a funtion
+  if (function.getNumArguments() || function.getType().getNumResults()) {
+    llvm::SmallVector<mlir::Type, 4> ret_types;
+    llvm::SmallVector<mlir::Type, 4> arg_types;
+
+    auto it = function.args_begin();
+    while (it != function.args_end()) {
+      auto memRefType = convertTensorToMemRef(it->getType().cast<TensorType>());
+      it->setType(memRefType);
+      it++;
+    }
+
+    // Translate the signature of the function and replace it
+    auto functionType = function.getType().cast<FunctionType>();
+    auto argTypes = functionType.getInputs();
+    auto retTypes = functionType.getResults();
+
+    for (auto arg : argTypes)
+      arg_types.emplace_back(convertTensorToMemRef(arg.cast<TensorType>()));
+    for (auto ret : retTypes)
+      ret_types.emplace_back(convertTensorToMemRef(ret.cast<TensorType>()));
+
+    OpBuilder builder(function.getContext());
+    auto new_func_type = builder.getFunctionType(arg_types, ret_types);
+    function.setType(new_func_type);
+  }
 
   // The first thing to define is the conversion target. This will define the
   // final target for this lowering.

@@ -175,24 +175,34 @@ private:
       TypeFunction* funcType = static_cast<TypeFunction*>(Fd->type);
       auto ty = funcType->next->ty;
       if (ty != Tvector && ty != Tarray && ty != Tsarray && ty != Taarray){
-        auto memRefType = mlir::MemRefType::get(1, type);
-        ret_types.push_back(memRefType);
+        auto dataType = mlir::RankedTensorType::get(1, type);
+        ret_types.push_back(dataType);
       } else {
         auto tensorType = type.cast<mlir::TensorType>();
-        auto memRefType = mlir::MemRefType::get(tensorType.getShape(),
-                                                tensorType.getElementType());
-        ret_types.push_back(memRefType);
+        ret_types.push_back(tensorType);
       }
     }
 
-    //Supposing that the type is integer
     unsigned long size = 0;
     if(Fd->parameters)
       size = Fd->parameters->length;
 
     // Arguments type is uniformly a generic array.
-    llvm::SmallVector<mlir::Type, 4> arg_types(size,
-        get_MLIRtype(Fd->parameters, nullptr));
+    llvm::SmallVector<mlir::Type, 4> arg_types;
+
+    if (size) {
+      for (auto var : *Fd->parameters){
+        auto type = get_MLIRtype(nullptr, var->type);
+        auto ty = var->type->ty;
+        if (ty != Tvector && ty != Tarray && ty != Tsarray && ty != Taarray){
+          auto dataType = mlir::RankedTensorType::get(1, type);
+          arg_types.emplace_back(dataType);
+        } else {
+          auto tensorType = type.cast<mlir::TensorType>();
+          arg_types.emplace_back(tensorType);
+        }
+      }
+    }
 
     auto func_type = builder.getFunctionType(arg_types, ret_types);
     auto function = mlir::FuncOp::create(loc(Fd->loc),
