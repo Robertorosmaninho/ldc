@@ -156,8 +156,11 @@ void MLIRStatements::mlirGen(IfStatement *ifStatement){
     mlirGen(scopeStatement);
   else if (IfStatement *nested_if = ifStatement->ifbody->isIfStatement())
     mlirGen(nested_if);
+  else if (ReturnStatement *Return = ifStatement->ifbody->isReturnStatement())
+    mlirGen(Return);
   else
     _miss++;
+
   //Writing a branch instruction on each block (if, else) to (end)
 
   builder.create<mlir::BranchOp>(location, end_if, args); //args = {}

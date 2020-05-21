@@ -191,12 +191,23 @@ MLIRDeclaration::mlirGen(StructDeclaration *structDeclaration, bool generated) {
       return mlir::emitError(loc(structDeclaration->loc)) << "error: "
          "variables within a struct definition must not have initializers";
 
-    mlir::Type type = get_MLIRtype(nullptr, variable->getType());
+    Type *type0;
+
+    if (!variable->getType())
+      if (auto varDecl = variable->isVarDeclaration())
+        type0 = varDecl->type;
+      else
+        fatal();
+    else
+      type0 = variable->getType();
+
+    mlir::Type type = get_MLIRtype(nullptr, type0);
+    if(!type || type.template isa <mlir::NoneType>())
+      return mlir::failure();
+
     if (!type.template isa<mlir::RankedTensorType>())
       type = mlir::RankedTensorType::get(1, type);
 
-    if(!type)
-      return mlir::failure();
     elementTypes.push_back(type);
   }
 
@@ -279,6 +290,9 @@ mlir::Value MLIRDeclaration::DtoAssignMLIR(mlir::Location Loc,
 
   if (t1->ty == Tbool) {
     IF_LOG Logger::println("DtoAssignMLIR == Tbool"); //TODO: DtoStoreZextI8
+  }else if (t1->ty == Tstruct) {
+    IF_LOG Logger::println("DtoAssignMLIR == Tstruct");
+    fatal();
   }
 
  // lhs = rhs; TODO: Verify whats it's better
@@ -813,8 +827,9 @@ mlir::Value MLIRDeclaration::mlirGen(DotVarExp *dotVarExp) {
 
     //  Logger::cout() << "mem: " << *arrptr << '\n';
     // result = new DLValue(e->type, DtoBitCast(arrptr, DtoPtrToType(e->type)));
-    /*} else if (FuncDeclaration *fdecl = e->var->isFuncDeclaration()) {
-      DtoResolveFunction(fdecl);
+    } else if (FuncDeclaration *fdecl = dotVarExp->var->isFuncDeclaration()) {
+      Logger::println("acess to Fd: %s", fdecl->toChars());
+      /*DtoResolveFunction(fdecl);
 
       // This is a bit more convoluted than it would need to be, because it
       // has to take templated interface methods into account, for which
@@ -1423,9 +1438,9 @@ void MLIRDeclaration::mlirGen(TemplateInstance *decl) {
   }
 
   for (auto &m : *decl->members) {
-    if (m->isDeclaration())
+    if (m->isDeclaration()) {
       mlirGen(m->isDeclaration());
-    else {
+    } else {
       IF_LOG Logger::println("MLIRGen Has to be implemented for: '%s'",
                              m->toChars());
       _miss++;

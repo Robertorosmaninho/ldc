@@ -86,6 +86,11 @@ public:
       } else if (dsym->isVarDeclaration()) {
         IF_LOG Logger::println("isVarDeclaration: '%s'",
                                dsym->isVarDeclaration()->toChars());
+      } else if (ClassDeclaration *classDeclaration =
+                     dsym->isClassDeclaration()) {
+        IF_LOG Logger::println("isClassDeclaration: '%s'",
+                               classDeclaration->toChars());
+        LOG_SCOPE
       } else if (ScopeDsymbol *scopeDsymbol = dsym->isScopeDsymbol()) {
         IF_LOG Logger::println("isScopeDsymbol: '%s'", scopeDsymbol->toChars());
         LOG_SCOPE

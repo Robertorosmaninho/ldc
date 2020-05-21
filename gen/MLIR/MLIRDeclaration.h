@@ -91,7 +91,7 @@ public:
   mlir::LogicalResult mlirGen(StructDeclaration* structDeclaration, bool generated);
   mlir::Value mlirGen(VarDeclaration* varDeclaration);
 
-  mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
+  static mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
       mlir::Value rhs, StringRef lhs_name, StringRef rhs_name, int op,
       bool canSkipPostblitm, Type* t1, Type* t2);
   mlir::Value DtoMLIRSymbolAddress(mlir::Location loc, Type* type,
