@@ -309,6 +309,23 @@ bool shouldDoLTO(llvm::Module *m) {
 }
 } // end of anonymous namespace
 
+std::string replaceExtensionWith(const DArray<const char> &ext,
+                                 const char *filename) {
+  const auto outputFlags = {global.params.output_o, global.params.output_bc,
+                            global.params.output_ll, global.params.output_s,
+                            global.params.output_mlir};
+  const auto numOutputFiles =
+      std::count_if(outputFlags.begin(), outputFlags.end(),
+                    [](OUTPUTFLAG flag) { return flag != 0; });
+
+  if (numOutputFiles == 1)
+    return filename;
+  llvm::SmallString<128> buffer(filename);
+  llvm::sys::path::replace_extension(buffer,
+                                     llvm::StringRef(ext.ptr, ext.length));
+  return {buffer.data(), buffer.size()};
+}
+
 void writeModule(llvm::Module *m, const char *filename) {
   const bool doLTO = shouldDoLTO(m);
   const bool outputObj = shouldOutputObjectFile();
@@ -414,7 +431,7 @@ void writeModule(llvm::Module *m, const char *filename) {
 
   // write LLVM IR
   if (global.params.output_ll) {
-    const auto llpath = replaceExtensionWith(global.ll_ext);
+    const auto llpath = replaceExtensionWith(global.ll_ext, filename);
     Logger::println("Writing LLVM IR to: %s\n", llpath.c_str());
     std::error_code errinfo;
     llvm::raw_fd_ostream aos(llpath.c_str(), errinfo, llvm::sys::fs::F_None);
@@ -436,7 +453,7 @@ void writeModule(llvm::Module *m, const char *filename) {
       llvm::sys::fs::createUniqueFile("ldc-%%%%%%%.s", buffer);
       spath = {buffer.data(), buffer.size()};
     } else {
-      spath = replaceExtensionWith(global.s_ext);
+      spath = replaceExtensionWith(global.s_ext, filename);
     }
 
     Logger::println("Writing asm to: %s\n", spath.c_str());

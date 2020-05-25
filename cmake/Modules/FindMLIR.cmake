@@ -29,66 +29,11 @@ else()
     set(MLIR_LIB_DIR     ${MLIR_ROOT_DIR}/lib)
 
     # To be done: add the required MLIR libraries. Hopefully we don't have to manually list all MLIR libs.
-    set(suffix "a")
-    if(EXISTS "libMLIRIR.lib")
-      set(suffix "lib")
-    endif()
-
-    set(MLIR_LIBRARIES
-                				libMLIRAffineOps.${suffix}
-                        libMLIRAffineToStandard.${suffix}
-                        libMLIRAnalysis.${suffix}
-                        libMLIRDialect.${suffix}
-                        libMLIREDSC.${suffix}
-                        libMLIRExecutionEngine.${suffix}
-                        libMLIRFxpMathOps.${suffix}
-                        libMLIRGPU.${suffix}
-                        libMLIRGPUtoNVVMTransforms.${suffix}
-                        libMLIRGPUtoROCDLTransforms.${suffix}
-                        libMLIRGPUtoSPIRVTransforms.${suffix}
-                        libMLIRIR.${suffix}
-                        libMLIRJitRunner.${suffix}
-                        libMLIRLinalg.${suffix}
-                        libMLIRLinalgToLLVM.${suffix}
-                        libMLIRLLVMIR.${suffix}
-                        libMLIRLoopOps.${suffix}
-                        libMLIRLoopsToGPU.${suffix}
-                        libMLIRLoopToStandard.${suffix}
-                        libMLIRMlirOptLib.${suffix}
-                        libMLIRNVVMIR.${suffix}
-                        libMLIROptMain.${suffix}
-                        libMLIRParser.${suffix}
-                        libMLIRPass.${suffix}
-                        libMLIRQuantizerFxpMathConfig.${suffix}
-                        libMLIRQuantizerSupport.${suffix}
-                        libMLIRQuantizerTransforms.${suffix}
-                        libMLIRQuantOps.${suffix}
-                        libMLIRROCDLIR.${suffix}
-                        libMLIRSDBM.${suffix}
-                        libMLIRSPIRV.${suffix}
-                        libMLIRSPIRVSerialization.${suffix}
-                        libMLIRSPIRVTestPasses.${suffix}
-                        libMLIRSPIRVTransforms.${suffix}
-                        libMLIRStandardOps.${suffix}
-                        libMLIRStandardToLLVM.${suffix}
-                        libMLIRStandardToSPIRVTransforms.${suffix}
-                        libMLIRSupport.${suffix}
-                        libMLIRTargetLLVMIR.${suffix}
-                        libMLIRTargetLLVMIRModuleTranslation.${suffix}
-                        libMLIRTargetNVVMIR.${suffix}
-#                        libMLIRTargetROCDLIR.${suffix}
-#                        libMLIRTestDialect.${suffix}
-#                        libMLIRTestIR.${suffix}
-#                        libMLIRTestPass.${suffix}
-#                        libMLIRTestTransforms.${suffix}
-                        libMLIRTransforms.${suffix}
-                        libMLIRTransformUtils.${suffix}
-                        libMLIRTranslateClParser.${suffix}
-                        libMLIRTranslation.${suffix}
-                        libMLIRVectorOps.${suffix}
-                        libMLIRVectorToLLVM.${suffix}
-                        libMLIRVectorToLoops.${suffix}
-           )
+    if(EXISTS "${MLIR_LIB_DIR}/MLIRIR.lib")
+      set(MLIR_LIBRARIES ${MLIR_LIB_DIR}/MLIRIR.lib ${MLIR_LIB_DIR}/MLIRSupport.lib)
+    elseif(EXISTS "${MLIR_LIB_DIR}/libMLIRIR.a")
+      set(MLIR_LIBRARIES ${MLIR_LIB_DIR}/libMLIRIR.a ${MLIR_LIB_DIR}/libMLIRSupport.a)
+    endif()  
 
     # XXX: This function is untested and will need adjustment.
     function(mlir_tablegen)

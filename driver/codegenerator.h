@@ -36,12 +36,22 @@ public:
   ~CodeGenerator();
   void emit(Module *m);
 
+#if LDC_MLIR_ENABLED
+  void emitMLIR(Module *m);
+#endif
+
 private:
   void prepareLLModule(Module *m);
   void finishLLModule(Module *m);
   void writeAndFreeLLModule(const char *filename);
+#if LDC_MLIR_ENABLED
+  void writeMLIRModule(mlir::OwningModuleRef *module, const char *filename);
+#endif
 
   llvm::LLVMContext &context_;
+#if LDC_MLIR_ENABLED
+  mlir::MLIRContext &mlirContext_;
+#endif
   int moduleCount_;
   bool const singleObj_;
   IRState *ir_;

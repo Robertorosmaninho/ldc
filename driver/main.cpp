@@ -527,6 +527,13 @@ void parseCommandLine(Strings &sourceFiles) {
     }
   }
 
+#ifndef LDC_MLIR_ENABLED
+  if (global.params.output_mlir == OUTPUTFLAGset) {
+    error(Loc(), "MLIR output requested but this LDC was built without MLIR support");
+    fatal();
+  }
+#endif
+
   if (soname.getNumOccurrences() > 0 && !global.params.dll) {
     error(Loc(), "-soname can be used only when building a shared library");
   }
@@ -665,6 +672,10 @@ void registerPredefinedTargetVersions() {
   case llvm::Triple::aarch64_be:
     VersionCondition::addPredefinedGlobalIdent("AArch64");
     registerPredefinedFloatABI("ARM_SoftFloat", "ARM_HardFloat", "ARM_SoftFP");
+    break;
+  case llvm::Triple::avr:
+    VersionCondition::addPredefinedGlobalIdent("AVR");
+    VersionCondition::addPredefinedGlobalIdent("D_SoftFloat");
     break;
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
@@ -1137,7 +1148,12 @@ void codegenModules(Modules &modules) {
       const auto atCompute = hasComputeAttr(m);
       if (atCompute == DComputeCompileFor::hostOnly ||
           atCompute == DComputeCompileFor::hostAndDevice) {
-        cg.emit(m);
+#if LDC_MLIR_ENABLED
+        if (global.params.output_mlir == OUTPUTFLAGset)
+          cg.emitMLIR(m);
+        else
+#endif
+          cg.emit(m);
       }
       if (atCompute != DComputeCompileFor::hostOnly) {
         computeModules.push_back(m);
