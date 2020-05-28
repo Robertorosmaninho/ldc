@@ -67,6 +67,10 @@ private:
   /// scope is destroyed and the mappings created in this scope are dropped.
   llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable;
 
+  /// A mapping for named struct types to the underlying MLIR type and the
+  /// original AST node.
+  llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap;
+
   /// D Function to be translated to MLIR
   FuncDeclaration *Fd;
 
@@ -98,12 +102,13 @@ private:
   bool byref = false;
 
 public:
-
-MLIRFunction(FuncDeclaration *Fd, mlir::MLIRContext &context,
-             const mlir::OpBuilder& builder,
-             llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
-             unsigned &total, unsigned &miss);
-~MLIRFunction();
+  MLIRFunction(
+      FuncDeclaration *Fd, mlir::MLIRContext &context,
+      const mlir::OpBuilder &builder,
+      llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
+      llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
+      unsigned &total, unsigned &miss);
+  ~MLIRFunction();
 
 mlir::FunctionType DtoMLIRFunctionType(FuncDeclaration *Fd, Type* thistype,
     Type* nesttype);

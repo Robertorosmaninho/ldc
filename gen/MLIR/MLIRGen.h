@@ -27,8 +27,7 @@ namespace ldc_mlir{
 
 /// Emit IR for the given D module, returns a newly created MLIR module
 /// or nullptr on failure.
-mlir::OwningModuleRef mlirGen(mlir::MLIRContext &mlirContext, Module *m,
-    IRState *irs);
+mlir::OwningModuleRef mlirGen(mlir::MLIRContext &mlirContext, Module *m);
 } //Namespace ldc_mlir
 
 

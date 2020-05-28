@@ -11,13 +11,13 @@
 #if LDC_MLIR_ENABLED
 #include "MLIRDeclaration.h"
 
-MLIRDeclaration::MLIRDeclaration(IRState *irs, Module *m,
-    mlir::MLIRContext &context, mlir::OpBuilder builder,
+MLIRDeclaration::MLIRDeclaration(
+    Module *m, mlir::MLIRContext &context, mlir::OpBuilder builder,
     llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
     llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
-    unsigned &total, unsigned &miss) : irState(irs), module(m), context(context),
-    builder(builder), symbolTable(symbolTable), structMap(structMap),
-    _total(total), _miss(miss){} //Constructor
+    unsigned &total, unsigned &miss)
+    : module(m), context(context), builder(builder), symbolTable(symbolTable),
+      structMap(structMap), _total(total), _miss(miss) {} // Constructor
 
 MLIRDeclaration::~MLIRDeclaration() = default;
 
@@ -1348,7 +1348,6 @@ mlir::Value MLIRDeclaration::DtoMLIRSymbolAddress(mlir::Location loc,
     _miss++;
     fatal();
   }
-  return nullptr;
   _miss++;
   llvm_unreachable("Unimplemented VarExp type");
 }
@@ -1427,7 +1426,7 @@ void MLIRDeclaration::mlirGen(TemplateInstance *decl) {
       Logger::println("Does not need codegen, skipping.");
       return;
     }
-    if (irState->dcomputetarget && (decl->tempdecl == Type::rtinfo ||
+    if (/*irState->dcomputetarget && */(decl->tempdecl == Type::rtinfo ||
                                 decl->tempdecl == Type::rtinfoImpl)) {
       // Emitting object.RTInfo(Impl) template instantiations in dcompute
       // modules would require dcompute support for global variables.
@@ -1573,7 +1572,7 @@ mlir::Type MLIRDeclaration::get_MLIRtype(Expression* expression, Type* type){
       return structMap.lookup(basetype->toChars()).first;
     } else {
         _miss++;
-        MLIRDeclaration declaration(irState, nullptr, context, builder,
+        MLIRDeclaration declaration(module, context, builder,
                                     symbolTable, structMap, _total, _miss);
         mlir::Value value = declaration.mlirGen(expression);
         return value.getType();

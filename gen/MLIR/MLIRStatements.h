@@ -18,7 +18,6 @@
 #include "dmd/statement.h"
 #include "dmd/expression.h"
 
-#include "gen/irstate.h"
 #include "gen/logger.h"
 #include "gen/modules.h"
 #include "gen/MLIR/MLIRGen.h"
@@ -38,7 +37,6 @@ using llvm::ScopedHashTableScope;
 
 class MLIRStatements{
 private:
-  IRState *irState;
   Module *module;
 
   /// In MLIR (like in LLVM) a "context" object holds the memory allocation and
@@ -68,10 +66,11 @@ private:
   unsigned decl_total = 0, decl_miss = 0;
 
 public:
-  MLIRStatements(IRState *irs, Module *m, mlir::MLIRContext &context,
-      mlir::OpBuilder builder_, llvm::ScopedHashTable<StringRef, mlir::Value>
-          &symbolTable, llvm::StringMap<std::pair<mlir::Type,
-          StructDeclaration *>> &structMap, unsigned &total, unsigned &miss);
+  MLIRStatements(
+      Module *m, mlir::MLIRContext &context, const mlir::OpBuilder &builder_,
+      llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
+      llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
+      unsigned &total, unsigned &miss);
   ~MLIRStatements();
   void mlirGen(IfStatement *ifStatement);
   mlir::Value mlirGen(Statement *statement);

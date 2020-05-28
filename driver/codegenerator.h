@@ -22,17 +22,18 @@
 #include "gen/irstate.h"
 #if LDC_MLIR_ENABLED
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/Module.h"
 #endif
 
 namespace ldc {
 
 class CodeGenerator {
 public:
-  CodeGenerator(llvm::LLVMContext &context, 
-#if LDC_MLIR_ENABLED	
-	mlir::MLIRContext &mlirContext,
+  CodeGenerator(llvm::LLVMContext &context,
+#if LDC_MLIR_ENABLED
+                mlir::MLIRContext &mlirContext,
 #endif
-    bool singleObj);
+                bool singleObj);
   ~CodeGenerator();
   void emit(Module *m);
 
@@ -55,9 +56,5 @@ private:
   int moduleCount_;
   bool const singleObj_;
   IRState *ir_;
-#if LDC_MLIR_ENABLED
-  mlir::MLIRContext &mlirContext_;
-#endif
-
 };
 }

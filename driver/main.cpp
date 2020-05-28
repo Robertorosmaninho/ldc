@@ -449,7 +449,7 @@ void parseCommandLine(Strings &sourceFiles) {
   global.params.output_o =
       (opts::output_o == cl::BOU_UNSET &&
        !(opts::output_bc || opts::output_ll || opts::output_s ||
-       opts::output_mlir))
+         opts::output_mlir))
           ? OUTPUTFLAGdefault
           : opts::output_o == cl::BOU_TRUE ? OUTPUTFLAGset : OUTPUTFLAGno;
   global.params.output_bc = opts::output_bc ? OUTPUTFLAGset : OUTPUTFLAGno;
@@ -520,8 +520,8 @@ void parseCommandLine(Strings &sourceFiles) {
                strcmp(ext, global.s_ext.ptr) == 0) {
       global.params.output_s = OUTPUTFLAGset;
       global.params.output_o = OUTPUTFLAGno;
-    }else if(opts::output_mlir.getNumOccurrences() == 0 &&
-             strcmp(ext, global.mlir_ext.ptr) == 0) {
+    } else if (opts::output_mlir.getNumOccurrences() == 0 &&
+               strcmp(ext, global.mlir_ext.ptr) == 0) {
       global.params.output_mlir = OUTPUTFLAGset;
       global.params.output_o = OUTPUTFLAGno;
     }
@@ -1117,13 +1117,13 @@ void codegenModules(Modules &modules) {
   // Generate one or more object/IR/bitcode files/dcompute kernels.
   if (global.params.obj && !modules.empty()) {
 #if LDC_MLIR_ENABLED
-    //Registering DDialect and getting mlircontext with it
+    // Registering DDialect and getting mlircontext with it
     mlir::registerDialect<mlir::D::DDialect>();
     mlir::MLIRContext mlircontext;
     ldc::CodeGenerator cg(getGlobalContext(), mlircontext,
-                                                         global.params.oneobj);
+                          global.params.oneobj);
 #else
-		ldc::CodeGenerator cg(getGlobalContext(), global.params.oneobj);
+    ldc::CodeGenerator cg(getGlobalContext(), global.params.oneobj);
 #endif
 
     DComputeCodeGenManager dccg(getGlobalContext());

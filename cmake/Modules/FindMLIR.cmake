@@ -4,6 +4,7 @@
 #   MLIR_FOUND   ON if MLIR installation was found
 #   MLIR_ROOT_DIR
 #   MLIR_INCLUDE_DIR
+#   MLIR_INCLUDE_BUILD_DIR
 #   MLIR_LIB_DIR
 #   MLIR_LIBRARIES
 #   MLIR_TABLEGEN  The mlir-tblgen executable
@@ -24,15 +25,42 @@ else()
     message(STATUS "Found mlir-tblgen: ${MLIR_TABLEGEN}")
     get_filename_component(MLIR_BIN_DIR ${MLIR_TABLEGEN} DIRECTORY CACHE)
     get_filename_component(MLIR_ROOT_DIR "${MLIR_BIN_DIR}/.." ABSOLUTE CACHE)
-    include_directories(${MLIR_ROOT_DIR}/../build/tools/mlir/include)
-    set(MLIR_INCLUDE_DIR ${MLIR_ROOT_DIR}/include)
+    set(MLIR_INCLUDE_BUILD_DIR ${MLIR_ROOT_DIR}/tools/mlir/include)
     set(MLIR_LIB_DIR     ${MLIR_ROOT_DIR}/lib)
+    set(MLIR_INCLUDE_DIR ${MLIR_ROOT_DIR}/../mlir/include)
 
     # To be done: add the required MLIR libraries. Hopefully we don't have to manually list all MLIR libs.
     if(EXISTS "${MLIR_LIB_DIR}/MLIRIR.lib")
-      set(MLIR_LIBRARIES ${MLIR_LIB_DIR}/MLIRIR.lib ${MLIR_LIB_DIR}/MLIRSupport.lib)
+      set(MLIR_LIBRARIES
+              ${MLIR_LIB_DIR}/MLIRIR.lib
+              ${MLIR_LIB_DIR}/MLIRSupport.lib
+              ${MLIR_LIB_DIR}/libMLIRAffineOps.lib
+              ${MLIR_LIB_DIR}/libMLIRAnalysis.lib
+              ${MLIR_LIB_DIR}/libMLIRDialect.lib
+              ${MLIR_LIB_DIR}/libMLIRIR.lib
+              ${MLIR_LIB_DIR}/libMLIRLLVMIR.lib
+              ${MLIR_LIB_DIR}/libMLIRLoopOps.lib
+              ${MLIR_LIB_DIR}/libMLIRPass.lib
+              ${MLIR_LIB_DIR}/libMLIRStandardOps.lib
+              ${MLIR_LIB_DIR}/libMLIRSupport.lib
+              ${MLIR_LIB_DIR}/libMLIRTransformUtils.lib
+              ${MLIR_LIB_DIR}/libMLIRTransforms.lib
+              )
     elseif(EXISTS "${MLIR_LIB_DIR}/libMLIRIR.a")
-      set(MLIR_LIBRARIES ${MLIR_LIB_DIR}/libMLIRIR.a ${MLIR_LIB_DIR}/libMLIRSupport.a)
+      set(MLIR_LIBRARIES
+              ${MLIR_LIB_DIR}/libMLIRAffineOps.a
+              ${MLIR_LIB_DIR}/libMLIRAnalysis.a
+              ${MLIR_LIB_DIR}/libMLIRDialect.a
+              ${MLIR_LIB_DIR}/libMLIRIR.a
+              ${MLIR_LIB_DIR}/libMLIRLLVMIR.a
+              ${MLIR_LIB_DIR}/libMLIRLoopOps.a
+              ${MLIR_LIB_DIR}/libMLIRPass.a
+              ${MLIR_LIB_DIR}/libMLIRStandardOps.a
+              ${MLIR_LIB_DIR}/libMLIRSupport.a
+              ${MLIR_LIB_DIR}/libMLIRTransformUtils.a
+              ${MLIR_LIB_DIR}/libMLIRTransforms.a
+              )
+      message(${MLIR_LIBRARIES})
     endif()  
 
     # XXX: This function is untested and will need adjustment.

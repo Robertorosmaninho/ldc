@@ -11,11 +11,14 @@
 
 #include "IrFunction.h"
 
-MLIRFunction::MLIRFunction(FuncDeclaration *Fd, mlir::MLIRContext &context,
-    const mlir::OpBuilder& builder,
+MLIRFunction::MLIRFunction(
+    FuncDeclaration *Fd, mlir::MLIRContext &context,
+    const mlir::OpBuilder &builder,
     llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
-    unsigned &total, unsigned &miss) : context(context), builder(builder),
-    symbolTable(symbolTable), Fd(Fd), _total(total), _miss(miss) {}
+    llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
+    unsigned &total, unsigned &miss)
+    : context(context), builder(builder), symbolTable(symbolTable),
+      structMap(structMap), Fd(Fd), _total(total), _miss(miss) {}
 
 MLIRFunction::~MLIRFunction() = default;
 
@@ -323,9 +326,22 @@ mlir::Type MLIRFunction::get_MLIRtype(Expression* expression, Type* type){
     return builder.getF64Type();
   } else if (basetype->ty == Tfloat80) {
     _miss++;     //TODO: Build F80 type on DDialect
-  } else if (basetype->ty == Tvector) {
-    mlir::TensorType tensor;
+  } else if (basetype->ty == Tvector || basetype->ty == Tarray ||
+             basetype->ty == Taarray) {
+    mlir::UnrankedTensorType tensor;
     return tensor;
+  } else if (basetype->ty == Tsarray) {
+    auto size = basetype->isTypeSArray()->dim->toInteger();
+    return mlir::RankedTensorType::get(
+        size, get_MLIRtype(nullptr, type->isTypeSArray()->next));
+  } else if (basetype->ty == Tfunction) {
+    TypeFunction *typeFunction = static_cast<TypeFunction *>(basetype);
+    return get_MLIRtype(nullptr, typeFunction->next);
+  } else if (basetype->ty == Tstruct) {
+    auto varIt = structMap.lookup(basetype->toChars());
+    if (!varIt.first)
+      fatal();
+    return structMap.lookup(basetype->toChars()).first;
   }
   Logger::print("Impossible to infer the type!");
   _miss++;

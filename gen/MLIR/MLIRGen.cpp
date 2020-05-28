@@ -19,7 +19,6 @@
 #include "dmd/statement.h"
 
 #include "gen/llvmhelpers.h"
-#include "gen/irstate.h"
 #include "gen/logger.h"
 #include "gen/MLIR/MLIRGen.h"
 #include "gen/MLIR/MLIRStatements.h"
@@ -51,14 +50,13 @@ namespace {
 
 class MLIRGenImpl {
 public:
-  MLIRGenImpl(mlir::MLIRContext &context, IRState *irs)
-      : irs(irs), context(context), builder(&context) {}
+  MLIRGenImpl(mlir::MLIRContext &context)
+      : context(context), builder(&context) {}
 
   mlir::ModuleOp mlirGen(Module *m){
     theModule = mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
-    m->ir->resetAll();
 
-    MLIRDeclaration declaration(irs, m, context, builder, symbolTable,
+    MLIRDeclaration declaration(m, context, builder, symbolTable,
                                 structMap, total, miss);
 
     for(unsigned long k = 0; k < m->members->length; k++) {
@@ -72,12 +70,11 @@ public:
       if (fd != nullptr) {
         auto func = mlirGen(fd);
         if (!func)
-          return nullptr;
+          fatal();
         theModule.push_back(func);
       } else if (StructDeclaration *structDecl = dsym->isStructDeclaration()){
         if(failed(declaration.mlirGen(structDecl, 0)))
           fatal();
-
       } else if (dsym->isInstantiated()) {
         IF_LOG Logger::println("isTemplateInstance: '%s'",
                                dsym->isTemplateInstance()->toChars());
@@ -98,7 +95,7 @@ public:
         if(auto *templateInstance = scopeDsymbol->isTemplateInstance()) {
           declaration.mlirGen(templateInstance);
         }
-      }else{
+      } else {
         IF_LOG Logger::println("Unnable to recoganize dsym member: '%s'",
             dsym->toPrettyChars());
         miss++;
@@ -123,9 +120,9 @@ public:
 
 private:
 
-  /// Getting IRState to have access to all Statments and Declarations of
-  // programs
-  IRState *irs;
+  /// Getting Module to have access to all Statements and Declarations of
+  /// programs
+  Module *module;
 
   /// In MLIR (like in LLVM) a "context" object holds the memory allocation and
   /// ownership of many internal structures of the IR and provides a level of
@@ -207,14 +204,13 @@ private:
           arg_types.emplace_back(tensorType);
         }
       }
+    } else {
+      arg_types = llvm::SmallVector<mlir::Type, 4>(0, nullptr);
     }
 
     auto func_type = builder.getFunctionType(arg_types, ret_types);
-    auto function = mlir::FuncOp::create(loc(Fd->loc),
-                                         StringRef(Fd->mangleString),
-                                         func_type, {}); //TODO: Should this have the arguments?
-
-
+    auto function = mlir::FuncOp::create(
+        loc(Fd->loc), StringRef(Fd->toChars()), func_type, {});
     return function;
   }
 
@@ -227,7 +223,7 @@ private:
     mlir::Type type = FuncDecl.DtoMLIRFunctionType(Fd, nullptr, nullptr);
 
     // Create an MLIR function for the given prototype.
-    mlir::FuncOp function = mlirGen(Fd, true);
+    mlir::FuncOp function(mlirGen(Fd, true));
     if (!function)
       return nullptr;
 
@@ -242,8 +238,8 @@ private:
     builder.setInsertionPointToStart(&entryBlock);
 
     // Initialize the object to be the "visitor"
-    MLIRStatements genStmt(irs, irs->dmodule, context, builder,
-        symbolTable, structMap, total, miss);
+    MLIRStatements genStmt(module, context, builder, symbolTable, structMap,
+                           total, miss);
 
     //Setting arguments of a given function
     unsigned long size = 0;
@@ -261,11 +257,9 @@ private:
         return nullptr;
     }
     // Emit the body of the function.
-
-    mlir::LogicalResult result = genStmt.genStatements(Fd);
-    if (mlir::failed(result)) {
+    if (mlir::failed(genStmt.genStatements(Fd))) {
       function.erase();
-      return nullptr;
+      fatal();
     }
   //  function.getBody().back().back().getParentRegion()->viewGraph();
 
@@ -332,7 +326,7 @@ private:
       return get_MLIRtype(nullptr, typeFunction->next);
     } else {
         miss++;
-        MLIRDeclaration declaration(irs, nullptr, context, builder,
+        MLIRDeclaration declaration(module, context, builder,
             symbolTable, structMap, total, miss);
         mlir::Value value = declaration.mlirGen(varDeclarations->front());
         return value.getType();
@@ -347,8 +341,8 @@ private:
 namespace ldc_mlir {
 // The public API for codegen.
 mlir::OwningModuleRef mlirGen(mlir::MLIRContext &context,
-                              Module *m, IRState *irs) {
-  return MLIRGenImpl(context, irs).mlirGen(m);
+                              Module *m) {
+  return MLIRGenImpl(context).mlirGen(m);
 }
 } //ldc_mlir namespce
 

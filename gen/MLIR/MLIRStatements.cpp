@@ -16,14 +16,16 @@ namespace llvm{
 using llvm::StringRef;
 }
 
-MLIRStatements::MLIRStatements(IRState *irs, Module *m,
-    mlir::MLIRContext &context, mlir::OpBuilder builder_,
+MLIRStatements::MLIRStatements(
+    Module *m, mlir::MLIRContext &context, const mlir::OpBuilder &builder_,
     llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
     llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
-    unsigned &total, unsigned &miss) : irState(irs), module(m), context(context),
-    builder(builder_), symbolTable(symbolTable), structMap(structMap),
-    declaration(MLIRDeclaration(irs, m, context, builder_, symbolTable,
-        structMap, decl_total, decl_miss)), _total(total), _miss(miss) {}
+    unsigned &total, unsigned &miss)
+    : module(m), context(context), builder(builder_), symbolTable(symbolTable),
+      structMap(structMap),
+      declaration(MLIRDeclaration(m, context, builder_, symbolTable, structMap,
+                                  decl_total, decl_miss)),
+      _total(total), _miss(miss) {}
 
 MLIRStatements::~MLIRStatements() = default; //Default Destructor
 
@@ -108,7 +110,7 @@ void MLIRStatements::mlirGen(IfStatement *ifStatement){
 
   unsigned if_total = 0, if_miss = 0;
   // Builing the object to get the Value for an expression
-  MLIRDeclaration mlirDeclaration(irState,module, context, builder, symbolTable,
+  MLIRDeclaration mlirDeclaration(module, context, builder, symbolTable,
                                   structMap, if_total, if_miss);
 
   // Marks if a new direct branch is needed. This happens when we need to
@@ -206,7 +208,8 @@ mlir::LogicalResult MLIRStatements::mlirGen(ReturnStatement *returnStatement){
     auto expr = declaration.mlirGen(returnStatement->exp, builder.getInsertionBlock());
     if(!expr)
       return mlir::failure();
-    auto returnOp = builder.create<mlir::ReturnOp>(location, mlir::ValueRange(expr));
+    auto returnOp = builder.create<mlir::ReturnOp>(location, expr.getType(),
+                                                   mlir::ValueRange(expr));
 
     //Assuming that the function only returns one value
     returnOp.setOperand(0, expr);

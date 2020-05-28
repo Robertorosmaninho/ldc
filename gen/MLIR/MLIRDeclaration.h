@@ -23,7 +23,6 @@
 #include "dmd/template.h"
 #include "dmd/visitor.h"
 
-#include "gen/irstate.h"
 #include "gen/logger.h"
 #include "gen/modules.h"
 #include "gen/pragma.h"
@@ -46,7 +45,6 @@ using llvm::ScopedHashTableScope;
 
 class MLIRDeclaration {
 private:
-  IRState *irState;
   Module *module;
   mlir::Value *stmt = nullptr;
 
@@ -75,8 +73,8 @@ private:
   unsigned &_total, &_miss;
 
 public:
-  MLIRDeclaration(IRState *irs, Module *m, mlir::MLIRContext &context,
-      mlir::OpBuilder builder,
+  MLIRDeclaration(
+      Module *m, mlir::MLIRContext &context, mlir::OpBuilder builder,
       llvm::ScopedHashTable<StringRef, mlir::Value> &symbolTable,
       llvm::StringMap<std::pair<mlir::Type, StructDeclaration *>> &structMap,
       unsigned &total, unsigned &miss);

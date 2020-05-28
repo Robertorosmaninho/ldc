@@ -20,8 +20,12 @@
 #include "driver/linker.h"
 #include "driver/toobj.h"
 #if LDC_MLIR_ENABLED
-#include "driver/tomlirfile.h"
+#include "gen/MLIR/Dialect.h"
+#include "gen/MLIR/MLIRGen.h"
+#include "gen/MLIR/Passes.h"
+#include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
 #endif
 #include "gen/dynamiccompile.h"
 #include "gen/logger.h"
@@ -239,14 +243,14 @@ void inlineAsmDiagnosticHandler(const llvm::SMDiagnostic &d, void *context,
 namespace ldc {
 CodeGenerator::CodeGenerator(llvm::LLVMContext &context,
 #if LDC_MLIR_ENABLED
-    mlir::MLIRContext &mlirContext,
+                             mlir::MLIRContext &mlirContext,
 #endif
-bool singleObj)
-    : context_(context), moduleCount_(0), singleObj_(singleObj), ir_(nullptr)
+                             bool singleObj)
+    : context_(context),
 #if LDC_MLIR_ENABLED
-    , mlirContext_(mlirContext)
+      mlirContext_(mlirContext),
 #endif
-{
+      moduleCount_(0), singleObj_(singleObj), ir_(nullptr) {
   // Set the context to discard value names when not generating textual IR.
   if (!global.params.output_ll) {
     context_.setDiscardValueNames(true);
@@ -300,11 +304,6 @@ void CodeGenerator::finishLLModule(Module *m) {
   if (moduleCount_ == 1) {
     insertBitcodeFiles(ir_->module, ir_->context(), global.params.bitcodeFiles);
   }
-
-#if LDC_MLIR_ENABLED
-  mlir::registerPassManagerCLOptions();
-  writeMLIRModule(m, mlirContext_, m->objfile.toChars(), ir_);
-#endif
   writeAndFreeLLModule(m->objfile.toChars());
 }
 
@@ -391,12 +390,13 @@ void CodeGenerator::emitMLIR(Module *m) {
     fatal();
   }
 
-  mlir::OwningModuleRef module;
-  /*module = mlirGen(mlirContext, m, irs);
+  mlir::registerPassManagerCLOptions();
+  mlir::OwningModuleRef module = ldc_mlir::mlirGen(mlirContext_, m);
   if(!module){
+    const auto llpath = replaceExtensionWith(global.mlir_ext, m->objfile.toChars());
     IF_LOG Logger::println("Error generating MLIR:'%s'", llpath.c_str());
     fatal();
-  }*/
+  }
 
   writeMLIRModule(&module, m->objfile.toChars());
 
@@ -420,7 +420,38 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
       fatal();
     }
 
-    // module->print(aos);
+    mlir::PassManager pm(&mlirContext_);
+
+    // Apply any generic pass manager command line options and run the pipeline.
+    mlir::applyPassManagerCLOptions(pm);
+
+    //TODO:Needs to set a flag to lowering D->MLIR->Affine+std
+    bool isLoweringToAffine = true;
+    if(isLoweringToAffine){
+      pm.addPass(mlir::D::createLowerToAffinePass());
+      mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
+    //  optPM.addPass(mlir::createCanonicalizerPass());
+    //  optPM.addPass(mlir::createCSEPass());
+
+      //TODO: Needs to set a flag to enaple opt
+      //  bool enableOpt = 1;
+      //  if (enableOpt) {
+          optPM.addPass(mlir::createLoopFusionPass());
+          optPM.addPass(mlir::createMemRefDataFlowOptPass());
+      //  }
+
+
+      if(mlir::failed(pm.run(module->get()))){
+        IF_LOG Logger::println("Failed on running passes!");
+        return;
+      }
+    }
+    if(!module->get()){
+      IF_LOG Logger::println("Cannot write MLIR file to '%s'", llpath.c_str());
+      fatal();
+    }
+
+    module->get().print(aos);
   }
 }
 

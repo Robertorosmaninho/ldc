@@ -55,6 +55,7 @@ if(NOT (LDC_LLVM_VER LESS 1000))
     if(MLIR_FOUND)
         message(STATUS "Using MLIR installation directory: ${MLIR_ROOT_DIR}")
         include_directories(${MLIR_INCLUDE_DIR})
+        include_directories(${MLIR_INCLUDE_BUILD_DIR})
         add_subdirectory(gen/MLIR/)
         add_definitions("-DLDC_MLIR_ENABLED")
 
@@ -386,7 +387,6 @@ set(DRV_SRC
     driver/exe_path.cpp
     driver/targetmachine.cpp
     driver/toobj.cpp
-    driver/tomlirfile.cpp
     driver/tool.cpp
     driver/archiver.cpp
     driver/linker.cpp
@@ -414,7 +414,6 @@ set(DRV_HDR
     driver/plugins.h
     driver/targetmachine.h
     driver/toobj.h
-    driver/tomlirfile.cpp
     driver/tool.h
 )
 # exclude man.d from ldc (only required by ldmd)
