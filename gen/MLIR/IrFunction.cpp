@@ -22,10 +22,12 @@ MLIRFunction::MLIRFunction(
 
 MLIRFunction::~MLIRFunction() = default;
 
-mlir::Value MLIRFunction::DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration) {
+mlir::Value
+MLIRFunction::DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration) {
   if ((!global.params.useUnitTests || !funcDeclaration->type) &&
       funcDeclaration->isUnitTestDeclaration()) {
-    IF_LOG Logger::println("Ignoring unittest %s", funcDeclaration->toPrettyChars());
+    IF_LOG Logger::println("Ignoring unittest %s",
+                           funcDeclaration->toPrettyChars());
     return nullptr; // ignore declaration completely
   }
 
@@ -39,9 +41,10 @@ mlir::Value MLIRFunction::DtoMLIRResolveFunction(FuncDeclaration *funcDeclaratio
   }
 
   if (funcDeclaration->parent) {
-    if (TemplateInstance *templateInstance = funcDeclaration->parent->isTemplateInstance()) {
+    if (TemplateInstance *templateInstance =
+            funcDeclaration->parent->isTemplateInstance()) {
       if (TemplateDeclaration *templateDeclaration =
-          templateInstance->tempdecl->isTemplateDeclaration()){
+              templateInstance->tempdecl->isTemplateDeclaration()) {
         if (templateDeclaration->llvmInternal == LLVMva_arg) {
           Logger::println("magic va_arg found");
           funcDeclaration->llvmInternal = LLVMva_arg;
@@ -59,9 +62,11 @@ mlir::Value MLIRFunction::DtoMLIRResolveFunction(FuncDeclaration *funcDeclaratio
           Logger::println("magic inline asm found");
           TypeFunction *tf = static_cast<TypeFunction *>(funcDeclaration->type);
           if (tf->parameterList.varargs != VARARGvariadic ||
-              (funcDeclaration->parameters && funcDeclaration->parameters->length != 0)) {
-            templateDeclaration->error("invalid `__asm` declaration, must be a D style "
-                                       "variadic with no explicit parameters");
+              (funcDeclaration->parameters &&
+               funcDeclaration->parameters->length != 0)) {
+            templateDeclaration->error(
+                "invalid `__asm` declaration, must be a D style "
+                "variadic with no explicit parameters");
             fatal();
           }
           funcDeclaration->llvmInternal = LLVMinline_asm;
@@ -85,7 +90,8 @@ mlir::Value MLIRFunction::DtoMLIRResolveFunction(FuncDeclaration *funcDeclaratio
 
   DtoMLIRFunctionType(funcDeclaration, nullptr, nullptr);
 
-  IF_LOG Logger::println("DtoResolveFunction(%s): %s", funcDeclaration->toPrettyChars(),
+  IF_LOG Logger::println("DtoResolveFunction(%s): %s",
+                         funcDeclaration->toPrettyChars(),
                          funcDeclaration->loc.toChars());
   LOG_SCOPE;
 
@@ -103,7 +109,8 @@ void DtoMLIRAddExtendAttr(Type *type, std::vector<mlir::Attribute> &attrs) {
     //  mlir::ZeroExtendIOp::
     // attrs.push_back(type->isunsigned() ?
     //                 mlir::SignExtendIOp);
-    Logger::println("Zext: %d | Sext: %d", type->isunsigned(), type->isunsigned());
+    Logger::println("Zext: %d | Sext: %d", type->isunsigned(),
+                    type->isunsigned());
   }
 }
 
@@ -127,14 +134,15 @@ mlir::IntegerType MLIRFunction::DtoMLIRSize_t() {
 }
 
 mlir::FunctionType MLIRFunction::DtoMLIRFunctionType(FuncDeclaration *Fd,
-                                                    Type* thistype, Type* nesttype) {
+                                                     Type *thistype,
+                                                     Type *nesttype) {
   assert(Fd->type->ty == Tfunction);
-  IF_LOG Logger::println("Getting Function Type for '%s': '%s'",
-                         Fd->toChars(), Fd->type->toChars());
+  IF_LOG Logger::println("Getting Function Type for '%s': '%s'", Fd->toChars(),
+                         Fd->type->toChars());
 
   // sanity check
   assert(Fd->type->ty == Tfunction);
-  TypeFunction *funcType = static_cast<TypeFunction*>(Fd->type);
+  TypeFunction *funcType = static_cast<TypeFunction *>(Fd->type);
 
   assert(funcType->next && "Encountered function type with invalid return type;"
                            " trying to codegen function ignored by the "
@@ -157,7 +165,8 @@ mlir::FunctionType MLIRFunction::DtoMLIRFunctionType(FuncDeclaration *Fd,
   // Arguments
   std::vector<std::pair<mlir::IntegerType, mlir::Type>> args;
 
-  //Logger::println("FuncType: %s  |  NextType: %s", funcType->toChars(),next->toChars());
+  // Logger::println("FuncType: %s  |  NextType: %s",
+  // funcType->toChars(),next->toChars());
   const bool isMain = Fd && strncmp(Fd->toChars(), "main", 4) == 0;
   if (isMain) {
     // D and C main functions always return i32, even if declared as returning
@@ -170,10 +179,10 @@ mlir::FunctionType MLIRFunction::DtoMLIRFunctionType(FuncDeclaration *Fd,
     const bool byref = funcType->isref && next->toBasetype()->ty != Tvoid;
     std::vector<mlir::Attribute> attrs;
 
-    if(abi->returnInArg(funcType, Fd && Fd->needThis())) {
+    if (abi->returnInArg(funcType, Fd && Fd->needThis())) {
       // sret return
       std::vector<mlir::Attribute> sretAttrs;
-      //sretAttrs.push_back(mlir::Attr)
+      // sretAttrs.push_back(mlir::Attr)
       Logger::println("StructType - Missing MLIRGen");
       _miss++;
       fatal();
@@ -215,11 +224,12 @@ mlir::FunctionType MLIRFunction::DtoMLIRFunctionType(FuncDeclaration *Fd,
 
   // Non-typesafe variadics (both C and D styles) are also variadics on the LLVM
   // level.
-  const bool isLLVMVariadic = (funcType->parameterList.varargs == VARARGvariadic);
+  const bool isLLVMVariadic =
+      (funcType->parameterList.varargs == VARARGvariadic);
   if (isLLVMVariadic && funcType->linkage == LINKd) {
     // Add extra `_arguments` parameter for D-style variadic functions.
-    Logger::println("arg_arguments: '%s' - Missing MLIRGen", getTypeInfoType
-        ()->arrayOf()->toChars());
+    Logger::println("arg_arguments: '%s' - Missing MLIRGen",
+                    getTypeInfoType()->arrayOf()->toChars());
     ++nextLLArgIdx;
   }
 
@@ -230,7 +240,7 @@ mlir::FunctionType MLIRFunction::DtoMLIRFunctionType(FuncDeclaration *Fd,
     Type *mainargs = Type::tchar->arrayOf()->arrayOf();
     Logger::println("Missing mainargs MLIRGen: %s", mainargs->toChars());
 
-    //newIrFty.args.push_back(new IrFuncTyArg(mainargs, false));
+    // newIrFty.args.push_back(new IrFuncTyArg(mainargs, false));
     ++nextLLArgIdx;
   }
 
@@ -246,9 +256,11 @@ mlir::FunctionType MLIRFunction::DtoMLIRFunctionType(FuncDeclaration *Fd,
   return functionType;
 }
 
-mlir::Type MLIRFunction::DtoMLIRDeclareFunction(FuncDeclaration* funcDeclaration) {
+mlir::Type
+MLIRFunction::DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration) {
 
-  IF_LOG Logger::println("DtoDeclareFunction(%s): %s", funcDeclaration->toPrettyChars(),
+  IF_LOG Logger::println("DtoDeclareFunction(%s): %s",
+                         funcDeclaration->toPrettyChars(),
                          funcDeclaration->loc.toChars());
   LOG_SCOPE;
 
@@ -265,14 +277,14 @@ mlir::Type MLIRFunction::DtoMLIRDeclareFunction(FuncDeclaration* funcDeclaration
     fatal();
   }
 
-  //Check if the function is defineAsExternallyAvailable
+  // Check if the function is defineAsExternallyAvailable
 
   // get TypeFunction*
   Type *t = funcDeclaration->type->toBasetype();
-  TypeFunction *f = static_cast<TypeFunction*>(t);
+  TypeFunction *f = static_cast<TypeFunction *>(t);
 
   mlir::FuncOp vaFunc = nullptr;
-  //if (DtoIsVaIntrinsic(funcDeclaration)) {
+  // if (DtoIsVaIntrinsic(funcDeclaration)) {
   //  vafunc = DtoDeclareVaFunction(funcDeclaration);
   //}
 
@@ -281,25 +293,24 @@ mlir::Type MLIRFunction::DtoMLIRDeclareFunction(FuncDeclaration* funcDeclaration
   // DMD treats _Dmain as having C calling convention and this has been
   // hardcoded into druntime, even if the frontend type has D linkage (Bugzilla
   // issue 9028).
-  const bool forceC = DtoIsIntrinsic(funcDeclaration) || funcDeclaration->isMain();
+  const bool forceC =
+      DtoIsIntrinsic(funcDeclaration) || funcDeclaration->isMain();
   const auto link = forceC ? LINKc : f->linkage;
 
   // mangled name
-  mlir::FunctionType functionType =
-      static_cast<mlir::FunctionType>(DtoMLIRFunctionType(funcDeclaration,
-                                                      nullptr, nullptr));
-  //mlir::FuncOp *func =
+  mlir::FunctionType functionType = static_cast<mlir::FunctionType>(
+      DtoMLIRFunctionType(funcDeclaration, nullptr, nullptr));
+  // mlir::FuncOp *func =
 }
 
-
-mlir::Type MLIRFunction::get_MLIRtype(Expression* expression, Type* type){
-  if(expression == nullptr && type == nullptr)
+mlir::Type MLIRFunction::get_MLIRtype(Expression *expression, Type *type) {
+  if (expression == nullptr && type == nullptr)
     return mlir::NoneType::get(&context);
 
   _total++;
 
-  Type* basetype;
-  if(type != nullptr)
+  Type *basetype;
+  if (type != nullptr)
     basetype = type->toBasetype();
   else
     basetype = expression->type->toBasetype();
@@ -307,25 +318,25 @@ mlir::Type MLIRFunction::get_MLIRtype(Expression* expression, Type* type){
   if (basetype->ty == Tchar || basetype->ty == Twchar ||
       basetype->ty == Tdchar || basetype->ty == Tnull ||
       basetype->ty == Tvoid || basetype->ty == Tnone) {
-    return mlir::NoneType::get(&context); //TODO: Build these types on DDialect
-  } else if (basetype->ty == Tbool){
+    return mlir::NoneType::get(&context); // TODO: Build these types on DDialect
+  } else if (basetype->ty == Tbool) {
     return builder.getIntegerType(1);
-  } else if (basetype->ty == Tint8 || basetype->ty == Tuns8){
+  } else if (basetype->ty == Tint8 || basetype->ty == Tuns8) {
     return builder.getIntegerType(8);
-  } else if (basetype->ty == Tint16 || basetype->ty == Tuns16){
+  } else if (basetype->ty == Tint16 || basetype->ty == Tuns16) {
     return builder.getIntegerType(16);
-  } else if (basetype->ty == Tint32 || basetype->ty == Tuns32){
+  } else if (basetype->ty == Tint32 || basetype->ty == Tuns32) {
     return builder.getIntegerType(32);
-  } else if (basetype->ty == Tint64 || basetype->ty == Tuns64){
+  } else if (basetype->ty == Tint64 || basetype->ty == Tuns64) {
     return builder.getIntegerType(64);
   } else if (basetype->ty == Tint128 || basetype->ty == Tuns128) {
     return builder.getIntegerType(128);
-  } else if (basetype->ty == Tfloat32){
+  } else if (basetype->ty == Tfloat32) {
     return builder.getF32Type();
-  } else if (basetype->ty == Tfloat64){
+  } else if (basetype->ty == Tfloat64) {
     return builder.getF64Type();
   } else if (basetype->ty == Tfloat80) {
-    _miss++;     //TODO: Build F80 type on DDialect
+    _miss++; // TODO: Build F80 type on DDialect
   } else if (basetype->ty == Tvector || basetype->ty == Tarray ||
              basetype->ty == Taarray) {
     mlir::UnrankedTensorType tensor;
@@ -348,4 +359,4 @@ mlir::Type MLIRFunction::get_MLIRtype(Expression* expression, Type* type){
   fatal();
   return nullptr;
 }
-#endif //LDC_MLIR_ENABLED
+#endif // LDC_MLIR_ENABLED

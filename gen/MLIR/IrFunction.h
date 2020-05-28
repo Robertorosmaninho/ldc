@@ -39,8 +39,8 @@
 
 #include "llvm/ADT/ScopedHashTable.h"
 
-using llvm::StringRef;
 using llvm::ScopedHashTableScope;
+using llvm::StringRef;
 
 struct valueType {
   Type *Dtype;
@@ -50,7 +50,6 @@ struct valueType {
 
 class MLIRFunction {
 private:
-
   /// In MLIR (like in LLVM) a "context" object holds the memory allocation and
   /// ownership of many internal structures of the IR and provides a level of
   /// "uniquing" across multiple modules (types for instance).
@@ -82,7 +81,7 @@ private:
   unsigned &_total, &_miss;
 
   /** This is the original D type as the frontend knows it
- *  May NOT be rewritten!!! */
+   *  May NOT be rewritten!!! */
   Type *const dtype = nullptr;
 
   /// The index of the declaration in the FuncDeclaration::parameters array
@@ -96,9 +95,9 @@ private:
    *  Must be valid for the LLVM Type and byref setting */
   std::vector<mlir::Attribute> attrs;
 
-/** 'true' if the final LLVM argument is a LLVM reference type.
- *  Must be true when the D Type is a value type, but the final
- *  LLVM Type is a reference type! */
+  /** 'true' if the final LLVM argument is a LLVM reference type.
+   *  Must be true when the D Type is a value type, but the final
+   *  LLVM Type is a reference type! */
   bool byref = false;
 
 public:
@@ -110,13 +109,13 @@ public:
       unsigned &total, unsigned &miss);
   ~MLIRFunction();
 
-mlir::FunctionType DtoMLIRFunctionType(FuncDeclaration *Fd, Type* thistype,
-    Type* nesttype);
-mlir::FunctionType DtoMLIRFunctionType(FuncDeclaration *Fd);
-mlir::Type DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration);
-mlir::Value DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration);
-mlir::IntegerType DtoMLIRSize_t();
-mlir::Type get_MLIRtype(Expression* expression, Type* type = nullptr);
+  mlir::FunctionType DtoMLIRFunctionType(FuncDeclaration *Fd, Type *thistype,
+                                         Type *nesttype);
+  mlir::FunctionType DtoMLIRFunctionType(FuncDeclaration *Fd);
+  mlir::Type DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration);
+  mlir::Value DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration);
+  mlir::IntegerType DtoMLIRSize_t();
+  mlir::Type get_MLIRtype(Expression *expression, Type *type = nullptr);
 };
 
 #endif

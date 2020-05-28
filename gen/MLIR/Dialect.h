@@ -22,15 +22,14 @@
 namespace mlir {
 namespace D {
 namespace detail {
-  struct StructTypeStorage;
+struct StructTypeStorage;
 } // end namespace detail
 
-
-  /// This is the definition of the Toy dialect. A dialect inherits from
+/// This is the definition of the Toy dialect. A dialect inherits from
 /// mlir::Dialect and registers custom attributes, operations, and types (in its
 /// constructor). It can also override some general behavior exposed via virtual
 /// methods.
-class DDialect : public mlir::Dialect{
+class DDialect : public mlir::Dialect {
 public:
   explicit DDialect(mlir::MLIRContext *context);
 
@@ -60,39 +59,39 @@ public:
 //===----------------------------------------------------------------------===//
 
 /// Create a local enumeration with all of the types that are defined by D.
-    namespace DTypes {
-      enum Types {
-        Struct = mlir::Type::FIRST_PRIVATE_EXPERIMENTAL_0_TYPE,
-      };
-    } // end namespace ToyTypes
+namespace DTypes {
+enum Types {
+  Struct = mlir::Type::FIRST_PRIVATE_EXPERIMENTAL_0_TYPE,
+};
+} // end namespace ToyTypes
 
 /// This class defines the D struct type. It represents a collection of
 /// element types. All derived types in MLIR must inherit from the CRTP class
 /// 'Type::TypeBase'. It takes as template parameters the concrete type
 /// (StructType), the base class to use (Type), and the storage class
 /// (StructTypeStorage).
-    class StructType : public mlir::Type::TypeBase<StructType, mlir::Type,
-        detail::StructTypeStorage> {
-    public:
-      /// Inherit some necessary constructors from 'TypeBase'.
-      using Base::Base;
+class StructType : public mlir::Type::TypeBase<StructType, mlir::Type,
+                                               detail::StructTypeStorage> {
+public:
+  /// Inherit some necessary constructors from 'TypeBase'.
+  using Base::Base;
 
-      /// This static method is used to support type inquiry through isa, cast,
-      /// and dyn_cast.
-      static bool kindof(unsigned kind) { return kind == DTypes::Struct; }
+  /// This static method is used to support type inquiry through isa, cast,
+  /// and dyn_cast.
+  static bool kindof(unsigned kind) { return kind == DTypes::Struct; }
 
-      /// Create an instance of a `StructType` with the given element types. There
-      /// *must* be atleast one element type.
-      static StructType get(llvm::ArrayRef<mlir::Type> elementTypes);
+  /// Create an instance of a `StructType` with the given element types. There
+  /// *must* be atleast one element type.
+  static StructType get(llvm::ArrayRef<mlir::Type> elementTypes);
 
-      /// Returns the element types of this struct type.
-      llvm::ArrayRef<mlir::Type> getElementTypes();
+  /// Returns the element types of this struct type.
+  llvm::ArrayRef<mlir::Type> getElementTypes();
 
-      /// Returns the number of element type held by this struct.
-      size_t getNumElementTypes() { return getElementTypes().size(); }
-    };
+  /// Returns the number of element type held by this struct.
+  size_t getNumElementTypes() { return getElementTypes().size(); }
+};
 
 } // end namespace toy
 } // end namespace mlir
 
-#endif //LDC_MLIR_ENABLED
+#endif // LDC_MLIR_ENABLED

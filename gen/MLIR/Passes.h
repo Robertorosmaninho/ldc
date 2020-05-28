@@ -13,14 +13,14 @@
 
 #include <memory>
 
-namespace mlir{
-  class Pass;
+namespace mlir {
+class Pass;
 
-  namespace D{
-    /// Create a pass for lowering to operations in the `Affine` and `Std`
-    /// dialects, for a subset of the D IR (e.g. matmul).
-    std::unique_ptr<mlir::Pass> createLowerToAffinePass();
-  } // end namespace D
+namespace D {
+/// Create a pass for lowering to operations in the `Affine` and `Std`
+/// dialects, for a subset of the D IR (e.g. matmul).
+std::unique_ptr<mlir::Pass> createLowerToAffinePass();
+} // end namespace D
 } // end namespace mlir
 
-#endif //LDC_PASSE
+#endif // LDC_PASSE
