@@ -421,17 +421,19 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
     }
 
     mlir::PassManager pm(&mlirContext_);
+ //   pm.addPass(mlir::createInlinerPass());
 
     // Apply any generic pass manager command line options and run the pipeline.
     mlir::applyPassManagerCLOptions(pm);
+
+    mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
+    optPM.addPass(mlir::createCanonicalizerPass());
+    //optPM.addPass(mlir::createCSEPass());
 
     //TODO:Needs to set a flag to lowering D->MLIR->Affine+std
     bool isLoweringToAffine = true;
     if(isLoweringToAffine){
       pm.addPass(mlir::D::createLowerToAffinePass());
-      mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
-    //  optPM.addPass(mlir::createCanonicalizerPass());
-    //  optPM.addPass(mlir::createCSEPass());
 
       //TODO: Needs to set a flag to enaple opt
       //  bool enableOpt = 1;

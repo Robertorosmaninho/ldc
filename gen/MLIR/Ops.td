@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef D_OPS
 #define D_OPS
 
 include "mlir/IR/OpBase.td"
@@ -62,6 +63,9 @@ def StructAccessOp : D_Op<"struct_access", [NoSideEffect]> {
 
   let verifier = [{ return ::verify(*this); }];
 
+  // Set the folder bit so that we can fold constant accesses.
+  let hasFolder = 1;
+
 }
 
 def StructConstantOp : D_Op<"struct_constant", [NoSideEffect]> {
@@ -81,6 +85,7 @@ def StructConstantOp : D_Op<"struct_constant", [NoSideEffect]> {
   let arguments = (ins ArrayAttr:$value);
   let results = (outs D_StructType);
   let verifier = [{ return ::verify(*this); }];
+  let hasFolder = 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -441,6 +446,8 @@ def IntegerOp : D_Op<"int", [NoSideEffect]> {
         "Builder *builder, OperationState &result, Attribute value",
         [{ build(builder, result, value.getType(), value); }]>
   ];
+
+  let hasFolder = 1;
 }
 
 
@@ -475,6 +482,8 @@ def FloatOp : D_Op<"float", [NoSideEffect]> {
          "Builder *builder, OperationState &result, Attribute value",
          [{ build(builder, result, value.getType(), value); }]>
   ];
+
+   let hasFolder = 1;
 }
 
 def DoubleOp : D_Op<"double", [NoSideEffect]> {
@@ -507,6 +516,8 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
             "Builder *builder, OperationState &result, Attribute value",
             [{ build(builder, result, value.getType(), value); }]>
   ];
+
+   let hasFolder = 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -530,5 +541,6 @@ def CastOp : D_Op<"cast"> {
       result.addOperands(value);
       result.addTypes(destType);
   }]>];
-
 }
+
+#endif // D_OPS

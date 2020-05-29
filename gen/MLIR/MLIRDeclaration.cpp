@@ -34,6 +34,10 @@ mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(Expression *exp) {
   else if (auto real = exp->isRealExp())
     return mlir::DenseElementsAttr::get(
         dataType, llvm::makeArrayRef((double)real->value));
+  else
+    _miss++;
+
+  fatal();
 }
 
 std::pair<mlir::ArrayAttr, mlir::Type>
@@ -490,7 +494,7 @@ mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp) {
 
       if (!rhs) {
         _miss++;
-        return nullptr;
+        fatal();
       }
       // TODO: Create test to evaluate this case and transform it into dialect
       // operation
@@ -501,7 +505,7 @@ mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp) {
 
       if (failed(declare(assignExp->e1->toChars(), rhs))) {
         _miss++;
-        return nullptr;
+        fatal();
       }
       return value;
     }
@@ -560,13 +564,13 @@ mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp) {
     _miss++;
     IF_LOG Logger::println("Failed to assign '%s' to '%s'",
                            assignExp->e2->toChars(), assignExp->e1->toChars());
-    return nullptr;
+    fatal();
   }
 
   IF_LOG Logger::println("Unable to translate AssignExp: '%s'",
                          assignExp->toChars());
   _miss++;
-  return nullptr;
+  fatal();
 }
 
 mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
@@ -799,6 +803,9 @@ mlir::Value MLIRDeclaration::mlirGen(DotVarExp *dotVarExp) {
 
   auto location = loc(dotVarExp->loc);
   Type *e1type = dotVarExp->e1->type->toBasetype();
+
+  if(auto value = symbolTable.lookup(dotVarExp->toChars()))
+    return value;
 
   if (VarDeclaration *vd = dotVarExp->var->isVarDeclaration()) {
     //  LLValue *arrptr;

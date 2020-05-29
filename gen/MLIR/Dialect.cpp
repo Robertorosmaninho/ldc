@@ -39,11 +39,27 @@ mlir::Operation *DDialect::materializeConstant(mlir::OpBuilder &builder,
                                                  mlir::Attribute value,
                                                  mlir::Type type,
                                                  mlir::Location loc) {
+  Type originalType = type;
+  mlir::Operation *op = nullptr;
+
+  if (type.isa<TensorType>())
+    type = type.cast<RankedTensorType>().getElementType();
+
   if (type.isa<StructType>())
-    return builder.create<StructConstantOp>(loc, type,
-                                            value.cast<mlir::ArrayAttr>());
-  return builder.create<mlir::ConstantOp>(loc, type,
-                                    value.cast<mlir::DenseElementsAttr>());
+    op = builder.create<StructConstantOp>(loc, originalType,
+                                          value.cast<mlir::ArrayAttr>());
+  else if (type.isF16() || type.isF32())
+    op = builder.create<mlir::D::FloatOp>(
+        loc, originalType, value.cast<mlir::DenseElementsAttr>());
+  else if (type.isF64())
+    op = builder.create<mlir::D::DoubleOp>(
+        loc, originalType, value.cast<mlir::DenseElementsAttr>());
+  else if (type.isInteger(1) || type.isInteger(8) || type.isInteger(16) ||
+           type.isInteger(32) || type.isInteger(64) || type.isInteger(128))
+    op = builder.create<mlir::D::IntegerOp>(
+        loc, originalType, value.cast<mlir::DenseElementsAttr>());
+
+  return op;
 }
 
 //===----------------------------------------------------------------------===//
