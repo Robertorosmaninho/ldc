@@ -12,6 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if LDC_MLIR_ENABLED
+
 #include "Dialect.h"
 #include <numeric>
 using namespace mlir;
@@ -40,3 +42,5 @@ OpFoldResult StructAccessOp::fold(ArrayRef<Attribute> operands) {
   size_t elementIndex = index().getZExtValue();
   return structAttr.getValue()[elementIndex];
 }
+
+#endif
