@@ -53,7 +53,7 @@ set(RT_SUPPORT_SANITIZERS OFF                                 CACHE BOOL   "Buil
 set(CMAKE_INSTALL_LIBDIR ${CMAKE_INSTALL_PREFIX}/lib${LIB_SUFFIX})
 
 set(DRUNTIME_EXTRA_FLAGS          -preview=fieldwise)
-set(DRUNTIME_EXTRA_UNITTEST_FLAGS -d-version=CoreUnittest -unittest) # no `-checkaction=context` yet
+set(DRUNTIME_EXTRA_UNITTEST_FLAGS -d-version=CoreUnittest -unittest -checkaction=context)
 set(PHOBOS2_EXTRA_FLAGS           -transition=complex)
 set(PHOBOS2_EXTRA_UNITTEST_FLAGS  -d-version=StdUnittest -unittest)
 
@@ -153,14 +153,11 @@ file(GLOB_RECURSE DRUNTIME_D ${RUNTIME_DIR}/src/*.d)
 list(REMOVE_ITEM DRUNTIME_D ${RUNTIME_DIR}/src/test_runner.d)
 # remove unsupported etc/linux/memoryerror.d (see issue #1915)
 list(REMOVE_ITEM DRUNTIME_D ${RUNTIME_DIR}/src/etc/linux/memoryerror.d)
-# FIXME: Remove all modules in core/stdcpp/ due to alpha quality.
-#        See PR #1917; partly fixed upstream.
-file(GLOB_RECURSE DRUNTIME_D_STDCPP ${RUNTIME_DIR}/src/core/stdcpp/*.d)
-list(REMOVE_ITEM DRUNTIME_D ${DRUNTIME_D_STDCPP})
 # remove some modules in rt/
 list(REMOVE_ITEM DRUNTIME_D
     ${RUNTIME_DIR}/src/rt/alloca.d
     ${RUNTIME_DIR}/src/rt/llmath.d
+    ${RUNTIME_DIR}/src/rt/memset.d
 )
 # only include core/sys/ modules matching the platform
 file(GLOB_RECURSE DRUNTIME_D_BIONIC  ${RUNTIME_DIR}/src/core/sys/bionic/*.d)
@@ -337,8 +334,8 @@ if(TARGET gen_gccbuiltins)
     )
   endfunction()
 
-  set(target_arch "AArch64;ARM;Mips;PowerPC;SystemZ;X86")
-  set(target_name "aarch64;arm;mips;ppc;s390;x86")
+  set(target_arch "AArch64;AMDGPU;ARM;Mips;NVPTX;PowerPC;SystemZ;X86")
+  set(target_name "aarch64;amdgcn;arm;mips;nvvm;ppc;s390;x86")
 
   foreach(target ${LLVM_TARGETS_TO_BUILD})
     list(FIND target_arch ${target} idx)

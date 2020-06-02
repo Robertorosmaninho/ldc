@@ -20,6 +20,7 @@
 #include "dmd/module.h"
 #include "dmd/mtype.h"
 #include "dmd/statement.h"
+#include "dmd/target.h"
 #include "dmd/template.h"
 #include "driver/cl_options.h"
 #include "driver/cl_options_instrumentation.h"
@@ -53,10 +54,11 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 #include <iostream>
 
-static bool isMainFunction(FuncDeclaration *fd) {
-  return fd->isMain() || (global.params.betterC && fd->isCMain());
+bool isAnyMainFunction(FuncDeclaration *fd) {
+  return fd->isMain() || fd->isCMain();
 }
 
 llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
@@ -84,7 +86,7 @@ llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
   // The index of the next argument on the LLVM level.
   unsigned nextLLArgIdx = 0;
 
-  const bool isMain = fd && isMainFunction(fd);
+  const bool isMain = fd && isAnyMainFunction(fd);
   if (isMain) {
     // D and C main functions always return i32, even if declared as returning
     // void.
@@ -177,7 +179,7 @@ llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
       Logger::println("lazy param");
       auto ltf = TypeFunction::create(nullptr, arg->type, VARARGnone, LINKd);
       auto ltd = createTypeDelegate(ltf);
-      loweredDType = ltd;
+      loweredDType = merge(ltd);
     } else if (passPointer) {
       // ref/out
       attrs.addDereferenceableAttr(loweredDType->size());
@@ -507,6 +509,32 @@ void applyXRayAttributes(FuncDeclaration &fdecl, llvm::Function &func) {
   }
 }
 
+void onlyOneMainCheck(FuncDeclaration *fd) {
+  if (!fd->fbody) // multiple *declarations* are fine
+    return;
+
+  // We'd actually want all possible main functions to be mutually exclusive.
+  // Unfortunately, a D main implies a C main, so only check C mains with
+  // -betterC.
+  if (fd->isMain() || (global.params.betterC && fd->isCMain()) ||
+      (global.params.isWindows && (fd->isWinMain() || fd->isDllMain()))) {
+    // global - across all modules compiled in this compiler invocation
+    static Loc mainLoc;
+    if (!mainLoc.filename) {
+      mainLoc = fd->loc;
+      assert(mainLoc.filename);
+    } else {
+      const char *otherMainNames =
+          global.params.isWindows ? ", `WinMain`, or `DllMain`" : "";
+      const char *mainSwitch =
+          global.params.addMain ? ", -main switch added another `main()`" : "";
+      error(fd->loc,
+            "only one `main`%s allowed%s. Previously found `main` at %s",
+            otherMainNames, mainSwitch, mainLoc.toChars());
+    }
+  }
+}
+
 } // anonymous namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -606,9 +634,15 @@ void DtoDeclareFunction(FuncDeclaration *fdecl) {
   // add func to IRFunc
   irFunc->setLLVMFunc(func);
 
-  // First apply the TargetMachine attributes, such that they can be overridden
-  // by UDAs.
+  // First apply the TargetMachine attributes and NonLazyBind attribute,
+  // such that they can be overridden by UDAs.
   applyTargetMachineAttributes(*func, *gTargetMachine);
+  if (!fdecl->fbody && opts::noPLT) {
+      // Add `NonLazyBind` attribute to function declarations,
+      // the codegen options allow skipping PLT.
+      func->addFnAttr(LLAttribute::NonLazyBind);
+  }
+
   applyFuncDeclUDAs(fdecl, irFunc);
 
   // parameter attributes
@@ -619,24 +653,17 @@ void DtoDeclareFunction(FuncDeclaration *fdecl) {
     }
   }
 
-  if(irFunc->isDynamicCompiled()) {
+  if (irFunc->isDynamicCompiled()) {
     declareDynamicCompiledFunction(gIR, irFunc);
   }
 
-  if (irFunc->targetCpuOverridden ||
-      irFunc->targetFeaturesOverridden) {
+  if (irFunc->targetCpuOverridden || irFunc->targetFeaturesOverridden) {
     gIR->targetCpuOrFeaturesOverridden.push_back(irFunc);
   }
 
-  // main
-  if (isMainFunction(fdecl) && fdecl->fbody) {
-    // Detect multiple main function definitions, which is disallowed.
-    // DMD checks this in the glue code, so we need to do it here as well.
-    if (gIR->mainFunc) {
-      error(fdecl->loc, "only one `main` function allowed");
-    }
-    gIR->mainFunc = func;
-  }
+  // Detect multiple main function definitions, which is disallowed.
+  // DMD checks this in the glue code, so we need to do it here as well.
+  onlyOneMainCheck(fdecl);
 
   // Set inlining attribute
   if (fdecl->neverInline) {
@@ -870,6 +897,62 @@ bool eraseDummyAfterReturnBB(llvm::BasicBlock *bb) {
     return true;
   }
   return false;
+}
+
+/**
+ * LLVM doesn't really support weak linkage for MSVC targets, it just prevents
+ * inlining. We can emulate it though, by conceptually renaming the defined
+ * function, only declaring the original function and embedding a linker
+ * directive in the object file, instructing the linker to fall back to the weak
+ * implementation if there's no strong definition.
+ * The object file still needs to be pulled in by the linker for the directive
+ * to be found.
+ */
+void emulateWeakAnyLinkageForMSVC(LLFunction *func, LINK linkage) {
+  const bool isWin32 = !global.params.is64bit;
+
+  std::string mangleBuffer;
+  llvm::StringRef finalMangle = func->getName();
+  if (finalMangle[0] == '\1') {
+    finalMangle = finalMangle.substr(1);
+  } else if (isWin32) {
+    // implicit underscore prefix for Win32
+    mangleBuffer = ("_" + finalMangle).str();
+    finalMangle = mangleBuffer;
+  }
+
+  std::string finalWeakMangle = finalMangle;
+  if (linkage == LINKcpp) {
+    assert(finalMangle.startswith("?"));
+    // prepend `__weak_` to first identifier
+    size_t offset = finalMangle.startswith("??$") ? 3 : 1;
+    finalWeakMangle.insert(offset, "__weak_");
+  } else if (linkage == LINKd) {
+    const size_t offset = isWin32 ? 1 : 0;
+    assert(finalMangle.substr(offset).startswith("_D"));
+    // prepend a `__weak` package
+    finalWeakMangle.insert(offset + 2, "6__weak");
+  } else {
+    // prepend `__weak_`
+    const size_t offset = isWin32 && finalMangle.startswith("_") ? 1 : 0;
+    finalWeakMangle.insert(offset, "__weak_");
+  }
+
+  const std::string linkerOption =
+      ("/ALTERNATENAME:" + finalMangle + "=" + finalWeakMangle).str();
+  gIR->addLinkerOption(llvm::StringRef(linkerOption));
+
+  // work around LLVM assertion when cloning a function's debuginfos
+  func->setSubprogram(nullptr);
+
+  llvm::ValueToValueMapTy dummy;
+  auto clone = llvm::CloneFunction(func, dummy);
+  clone->setName("\1" + finalWeakMangle);
+  setLinkage({LLGlobalValue::ExternalLinkage, func->hasComdat()}, clone);
+
+  // reduce the original definition to a declaration
+  setLinkage({LLGlobalValue::ExternalLinkage, false}, func);
+  func->deleteBody();
 }
 
 } // anonymous namespace
@@ -1177,14 +1260,14 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
   }
 
   // D varargs: prepare _argptr and _arguments
-  if (f->linkage == LINKd && f->parameterList.varargs == VARARGvariadic) {
+  if (f->isDstyleVariadic()) {
     // allocate _argptr (of type core.stdc.stdarg.va_list)
-    Type *const argptrType = typeSemantic(Type::tvalist, fd->loc, fd->_scope);
-    LLValue *argptrMem = DtoAlloca(argptrType, "_argptr_mem");
+    Type *tvalist = target.va_listType(fd->loc, fd->_scope);
+    LLValue *argptrMem = DtoAlloca(tvalist, "_argptr_mem");
     irFunc->_argptr = argptrMem;
 
     // initialize _argptr with a call to the va_start intrinsic
-    DLValue argptrVal(argptrType, argptrMem);
+    DLValue argptrVal(tvalist, argptrMem);
     LLValue *llAp = gABI->prepareVaStart(&argptrVal);
     llvm::CallInst::Create(GET_INTRINSIC_DECL(vastart), llAp, "",
                            gIR->scopebb());
@@ -1232,16 +1315,13 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
     gIR->DBuilder.EmitStopPoint(fd->endloc);
     if (func->getReturnType() == LLType::getVoidTy(gIR->context())) {
       gIR->ir->CreateRetVoid();
-    } else if (!gIR->isMainFunc(irFunc)) {
-      CompoundAsmStatement *asmb = fd->fbody->endsWithAsm();
-      if (asmb) {
-        assert(asmb->abiret);
-        gIR->ir->CreateRet(asmb->abiret);
-      } else {
-        gIR->ir->CreateRet(llvm::UndefValue::get(func->getReturnType()));
-      }
-    } else {
+    } else if (isAnyMainFunction(fd)) {
       gIR->ir->CreateRet(LLConstant::getNullValue(func->getReturnType()));
+    } else if (auto asmb = fd->fbody->endsWithAsm()) {
+      assert(asmb->abiret);
+      gIR->ir->CreateRet(asmb->abiret);
+    } else {
+      gIR->ir->CreateRet(llvm::UndefValue::get(func->getReturnType()));
     }
   }
   gIR->DBuilder.EmitFuncEnd(fd);
@@ -1256,6 +1336,11 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
   if (gIR->dcomputetarget && hasKernelAttr(fd)) {
     auto fn = gIR->module.getFunction(fd->mangleString);
     gIR->dcomputetarget->addKernelMetadata(fd, fn);
+  }
+
+  if (func->getLinkage() == LLGlobalValue::WeakAnyLinkage &&
+      global.params.targetTriple->isWindowsMSVCEnvironment()) {
+    emulateWeakAnyLinkageForMSVC(func, fd->linkage);
   }
 }
 

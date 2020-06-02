@@ -12,6 +12,7 @@
 #include "dmd/expression.h"
 #include "dmd/id.h"
 #include "dmd/identifier.h"
+#include "dmd/target.h"
 #include "gen/abi-aarch64.h"
 #include "gen/abi-arm.h"
 #include "gen/abi-generic.h"
@@ -30,6 +31,9 @@
 #include "ir/irfunction.h"
 #include "ir/irfuncty.h"
 #include <algorithm>
+
+// in dmd/argtypes_aarch64.d:
+bool isHFVA(Type *t, int maxNumElements, Type **rewriteType);
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -52,142 +56,51 @@ LLValue *ABIRewrite::getAddressOf(DValue *v) {
   return DtoAllocaDump(v, ".getAddressOf_dump");
 }
 
-LLValue *ABIRewrite::loadFromMemory(LLValue *address, LLType *asType,
-                                    const char *name) {
-  LLType *pointerType = address->getType();
-  assert(pointerType->isPointerTy());
-  LLType *pointeeType = pointerType->getPointerElementType();
+//////////////////////////////////////////////////////////////////////////////
 
-  if (asType == pointeeType) {
-    return DtoLoad(address, name);
+bool TargetABI::isHFVA(Type *t, int maxNumElements, LLType **hfvaType) {
+  Type *rewriteType = nullptr;
+  if (::isHFVA(t, maxNumElements, &rewriteType)) {
+    if (hfvaType)
+      *hfvaType = DtoType(rewriteType);
+    return true;
   }
-
-  if (getTypeStoreSize(asType) > getTypeAllocSize(pointeeType)) {
-    // not enough allocated memory
-    LLValue *paddedDump = DtoRawAlloca(asType, 0, ".loadFromMemory_paddedDump");
-    DtoMemCpy(paddedDump, address,
-              DtoConstSize_t(getTypeAllocSize(pointeeType)));
-    return DtoLoad(paddedDump, name);
-  }
-
-  address = DtoBitCast(address, getPtrToType(asType),
-                       ".loadFromMemory_bitCastAddress");
-  return DtoLoad(address, name);
+  return false;
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
-// A Homogeneous Floating-point Aggregate (HFA) is an ARM/AArch64 concept that
-// consists of up to 4 of same floating point type.  D floats of same size are
-// considered as same (e.g. ifloat and float are same).  It is the aggregate
-// final data layout that matters so nested structs, unions, and sarrays can
-// result in an HFA.
-//
-// simple HFAs: struct F1 {float f;}  struct D4 {double a,b,c,d;}
-// interesting HFA: struct {F1[2] vals; float weight;}
-
-namespace {
-bool isNestedHFA(const TypeStruct *t, d_uns64 &floatSize, int &num,
-                 uinteger_t adim) {
-  // Used internally by isHFA() to check struct recursively for HFA-ness.
-  // Return true if struct 't' is part of an HFA where 'floatSize' is sizeof
-  // the float and 'num' is number of these floats so far.  On return, 'num'
-  // is updated to the total number of floats in the HFA.  Set 'floatSize'
-  // to 0 discover the sizeof the float.  When struct 't' is part of an
-  // sarray, 'adim' is the dimension of that array, otherwise it is 1.
-  VarDeclarations fields = t->sym->fields;
-
-  // HFA can't contains an empty struct
-  if (fields.length == 0)
-    return false;
-
-  // Accumulate number of floats in HFA
-  int n;
-
-  // For unions, need to find field with most floats
-  int maxn = num;
-
-  for (VarDeclaration *field : fields) {
-    Type *tf = field->type;
-
-    // reset to initial num floats (all union fields are at offset 0)
-    if (field->offset == 0)
-      n = num;
-
-    // reset dim to dimension of sarray we are in (will be 1 if not)
-    uinteger_t dim = adim;
-
-    // Field is an array.  Process the arrayof type and multiply dim by
-    // array dim.  Note that empty arrays immediately exclude this struct
-    // from HFA status.
-    if (auto tarray = tf->isTypeSArray()) {
-      if (tarray->dim->toUInteger() == 0)
-        return false;
-      tf = tarray->nextOf();
-      dim *= tarray->dim->toUInteger();
-    }
-
-    if (auto tstruct = tf->isTypeStruct()) {
-      if (!isNestedHFA(tstruct, floatSize, n, dim))
-        return false;
-    } else if (tf->isfloating()) {
-      d_uns64 sz = tf->size();
-      n += dim;
-
-      if (tf->iscomplex()) {
-        sz /= 2; // complex is 2 floats, adjust sz
-        n += dim;
-      }
-
-      if (floatSize == 0) // discovered floatSize
-        floatSize = sz;
-      else if (sz != floatSize) // different float size, reject
-        return false;
-
-      // if (n > 4)
-      //  return false; // too many floats for HFA, reject
-    } else {
-      return false; // reject all other types
-    }
-
-    if (n > maxn)
-      maxn = n;
+TypeTuple *TargetABI::getArgTypes(Type *t) {
+  // try to reuse cached argTypes of StructDeclarations
+  if (auto ts = t->toBasetype()->isTypeStruct()) {
+    auto sd = ts->sym;
+    if (sd->sizeok == SIZEOKdone)
+      return sd->argTypes;
   }
 
-  num = maxn;
-  return true;
-}
+  return target.toArgTypes(t);
 }
 
-bool TargetABI::isHFA(TypeStruct *t, llvm::Type **rewriteType,
-                      const int maxFloats) {
-  d_uns64 floatSize = 0;
-  int num = 0;
-
-  if (isNestedHFA(t, floatSize, num, 1)) {
-    if (num <= maxFloats) {
-      if (rewriteType) {
-        llvm::Type *floatType = nullptr;
-        switch (floatSize) {
-        case 4:
-          floatType = llvm::Type::getFloatTy(gIR->context());
-          break;
-        case 8:
-          floatType = llvm::Type::getDoubleTy(gIR->context());
-          break;
-        case 16:
-          floatType = llvm::Type::getFP128Ty(gIR->context());
-          break;
-        default:
-          llvm_unreachable("Unexpected size for float type");
-        }
-        *rewriteType = LLArrayType::get(floatType, num);
-      }
-      return true;
-    }
+LLType *TargetABI::getRewrittenArgType(Type *t, TypeTuple *argTypes) {
+  if (!argTypes || argTypes->arguments->empty() ||
+      (argTypes->arguments->length == 1 &&
+       argTypes->arguments->front()->type == t)) {
+    return nullptr; // don't rewrite
   }
-  return false;
+
+  auto &args = *argTypes->arguments;
+  assert(args.length <= 2);
+  return args.length == 1
+             ? DtoType(args[0]->type)
+             : LLStructType::get(gIR->context(), {DtoType(args[0]->type),
+                                                  DtoType(args[1]->type)});
 }
+
+LLType *TargetABI::getRewrittenArgType(Type *t) {
+  return getRewrittenArgType(t, getArgTypes(t));
+}
+
+//////////////////////////////////////////////////////////////////////////////
 
 bool TargetABI::isAggregate(Type *t) {
   TY ty = t->toBasetype()->ty;
@@ -226,13 +139,15 @@ bool TargetABI::canRewriteAsInt(Type *t, bool include64bit) {
   return size == 1 || size == 2 || size == 4 || (include64bit && size == 8);
 }
 
+bool TargetABI::isExternD(TypeFunction *tf) {
+  return tf->linkage == LINKd && tf->parameterList.varargs != VARARGvariadic;
+}
+
 //////////////////////////////////////////////////////////////////////////////
 
 bool TargetABI::reverseExplicitParams(TypeFunction *tf) {
   // Required by druntime for extern(D), except for `, ...`-style variadics.
-  return tf->linkage == LINKd &&
-         tf->parameterList.varargs != VARARGvariadic &&
-         tf->parameterList.length() > 1;
+  return isExternD(tf) && tf->parameterList.length() > 1;
 }
 
 //////////////////////////////////////////////////////////////////////////////
