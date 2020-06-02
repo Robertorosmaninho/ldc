@@ -55,7 +55,8 @@ if(NOT (LDC_LLVM_VER LESS 1000))
     if(MLIR_FOUND)
         message(STATUS "Using MLIR installation directory: ${MLIR_ROOT_DIR}")
         include_directories(${MLIR_INCLUDE_DIR})
-        add_subdirectory(gen/MLIR)
+        include_directories(${MLIR_INCLUDE_BUILD_DIR})
+        add_subdirectory(gen/MLIR/)
         add_definitions("-DLDC_MLIR_ENABLED")
 
         set(LLVM_LIBRARIES "${MLIR_LIBRARIES}" ${LLVM_LIBRARIES})
@@ -110,7 +111,7 @@ include(GetLinuxDistribution)
 #
 
 # Version information
-set(LDC_VERSION "1.21.0") # May be overridden by git hash tag
+set(LDC_VERSION "1.22.0") # May be overridden by git hash tag
 set(DMDFE_MAJOR_VERSION   2)
 set(DMDFE_MINOR_VERSION   0)
 set(DMDFE_PATCH_VERSION   92)
@@ -373,9 +374,6 @@ file(GLOB_RECURSE DRV_SRC_D driver/*.d)
 file(GLOB_RECURSE IR_SRC_D ir/*.d)
 file(GLOB IR_SRC ir/*.cpp)
 file(GLOB IR_HDR ir/*.h)
-file(GLOB MLIR_HDR gen/MLIR/*.h)
-file(GLOB MLIR_SRC gen/MLIR/*.cpp)
-file(GLOB MLIR_INC gen/MLIR/*.inc)
 set(DRV_SRC
     driver/args.cpp
     driver/cache.cpp
@@ -389,7 +387,6 @@ set(DRV_SRC
     driver/exe_path.cpp
     driver/targetmachine.cpp
     driver/toobj.cpp
-    driver/tomlirfile.cpp
     driver/tool.cpp
     driver/archiver.cpp
     driver/linker.cpp
@@ -416,7 +413,6 @@ set(DRV_HDR
     driver/linker.h
     driver/plugins.h
     driver/targetmachine.h
-    driver/tomlirfile.h
     driver/toobj.h
     driver/tool.h
 )
@@ -428,9 +424,6 @@ set(LDC_CXX_SOURCE_FILES
     ${FE_HDR}
     ${GEN_SRC}
     ${GEN_HDR}
-    ${MLIR_HDR}
-    ${MLIR_SRC}
-    ${MLIR_INC}
     ${IR_SRC}
     ${IR_HDR}
 )
@@ -444,11 +437,6 @@ set(LDC_D_SOURCE_FILES
 source_group("Source Files\\dmd" FILES ${FE_SRC_D})
 source_group("Header Files\\dmd" FILES ${FE_HDR})
 source_group("Source Files\\gen" FILES ${GEN_SRC} ${GEN_SRC_D})
-if(MLIR_FOUND)
-source_group("Header Files\\gen\\MLIR" FILES ${MLIR_HDR})
-source_group("Source Files\\gen\\MLIR" FILES ${MLIR_SRC})
-source_group("Source Files\\gen\\MLIR" FILES ${MLIR_INC})
-endif()
 source_group("Header Files\\gen" FILES ${GEN_HDR})
 source_group("Source Files\\ir" FILES ${IR_SRC} ${IR_SRC_D})
 source_group("Header Files\\ir" FILES ${IR_HDR})
@@ -716,9 +704,7 @@ if (HAVE_SC_ARG_MAX)
    append("-DHAVE_SC_ARG_MAX" CMAKE_CXX_FLAGS)
 endif()
 
-set_source_files_properties( driver/args.cpp driver/exe_path.cpp driver/ldmd.cpp driver/response
-        .cpp
-        PROPERTIES
+set_source_files_properties(driver/args.cpp driver/exe_path.cpp driver/ldmd.cpp driver/response.cpp PROPERTIES
     COMPILE_FLAGS "${LLVM_CXXFLAGS} ${LDC_CXXFLAGS}"
     COMPILE_DEFINITIONS LDC_EXE_NAME="${LDC_EXE_NAME}"
 )

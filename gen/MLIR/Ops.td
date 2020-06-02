@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef D_OPS
 #define D_OPS
 
 include "mlir/IR/OpBase.td"
@@ -33,6 +34,59 @@ def D_Dialect : Dialect {
 //   * A list of traits for the operation.
 class D_Op<string mnemonic, list<OpTrait> traits = []> :
      Op<D_Dialect, mnemonic, traits>;
+
+// Provide a definition for the D StructType for use in ODS. This allows for
+// using StructType in a similar way to Tensor or MemRef.
+def D_StructType :
+    Type<CPred<"$_self.isa<StructType>()">, "D struct type">;
+
+// Provide a definition of the types that are used within the D dialect.
+def D_Type : AnyTypeOf<[AnyType, D_StructType]>;
+
+////////////////////////////////////////////////////////////////////////////////
+// Struct Operations
+////////////////////////////////////////////////////////////////////////////////
+
+def StructAccessOp : D_Op<"struct_access", [NoSideEffect]> {
+  let summary = "struct access";
+  let description = [{
+    Access the Nth element of a value returning a struct type.
+  }];
+
+  let arguments = (ins D_StructType:$input, I64Attr:$index);
+  let results = (outs D_Type);
+
+  // Allow building a StructAccessOp with just a struct value and an index.
+  let builders = [
+    OpBuilder<"Builder *b, OperationState &state, Value input, size_t index">
+  ];
+
+  let verifier = [{ return ::verify(*this); }];
+
+  // Set the folder bit so that we can fold constant accesses.
+  let hasFolder = 1;
+
+}
+
+def StructConstantOp : D_Op<"struct_constant", [NoSideEffect]> {
+  let summary = "struct constant";
+  let description = [{
+    Constant operation turns a literal struct value into an SSA value. The data
+    is attached to the operation as an attribute. The struct constant is encoded
+    as an array of other constant values. For example:
+
+    ```mlir
+      %0 = "D.struct_constant"() {
+        value = [dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf64>]
+      } : () -> !D.struct<tensor<*xf64>>
+    ```
+  }];
+
+  let arguments = (ins ArrayAttr:$value);
+  let results = (outs D_StructType);
+  let verifier = [{ return ::verify(*this); }];
+  let hasFolder = 1;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Binary Operations
@@ -83,15 +137,6 @@ def AddOp : IntArithmeticOp<"add", [Commutative]> {
         integer values.
         The type of the value operands are expected to match.
     }];
-
-   // let arguments = (ins AnyAttr:$lhs, AnyAttr:$rhs);
-   // let results = (outs AnyType);
-
-    // Allow building an AddOp with from the two input operands.
-  //  let builders = [
-  //    OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
-  //  ];
-
 }
 
 // AddFOp FloatLike infers the size of float
@@ -102,14 +147,6 @@ def AddFOp : FloatArithmeticOp<"fadd"> {
         The "addf" operation performs element-wise addition between two values.
         The type of the value operands are expected to match.
     }];
-
-  //  let arguments = (ins AnyAttr:$lhs, AnyAttr:$rhs);
-  //  let results = (outs FloatLike);
-
-    // Allow building an AddOp with from the two input operands.
- //   let builders = [
- //     OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
-  //  ];
 }
 
 // SubOp IntegerLike infers the size of int
@@ -409,6 +446,8 @@ def IntegerOp : D_Op<"int", [NoSideEffect]> {
         "Builder *builder, OperationState &result, Attribute value",
         [{ build(builder, result, value.getType(), value); }]>
   ];
+
+  let hasFolder = 1;
 }
 
 
@@ -443,6 +482,8 @@ def FloatOp : D_Op<"float", [NoSideEffect]> {
          "Builder *builder, OperationState &result, Attribute value",
          [{ build(builder, result, value.getType(), value); }]>
   ];
+
+   let hasFolder = 1;
 }
 
 def DoubleOp : D_Op<"double", [NoSideEffect]> {
@@ -475,6 +516,8 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
             "Builder *builder, OperationState &result, Attribute value",
             [{ build(builder, result, value.getType(), value); }]>
   ];
+
+   let hasFolder = 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -498,5 +541,6 @@ def CastOp : D_Op<"cast"> {
       result.addOperands(value);
       result.addTypes(destType);
   }]>];
-
 }
+
+#endif // D_OPS
