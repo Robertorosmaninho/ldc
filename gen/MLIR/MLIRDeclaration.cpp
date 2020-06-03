@@ -613,8 +613,8 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
     assert(dve);
     FuncDeclaration *fdecl = dve->var->isFuncDeclaration();
     assert(fdecl);
-    MLIRFunction mlirFunc(fdecl, context, builder,
-        symbolTable, _total, _miss);
+    MLIRFunction mlirFunc(fdecl, context, builder, symbolTable, structMap,
+                          _total, _miss);
     mlirFunc.DtoMLIRDeclareFunction(fdecl); //TODO: This does not work yet.
     //TODO: Create DtoRVal and DtoLVal
   } else {
@@ -1345,7 +1345,7 @@ mlir::Value MLIRDeclaration::DtoMLIRSymbolAddress(mlir::Location loc,
     }
 
     MLIRFunction DeclFunc(funcDeclaration, context, builder, symbolTable,
-                          _total, _miss);
+                          structMap, _total, _miss);
     DeclFunc.DtoMLIRResolveFunction(funcDeclaration);
 
     //  const auto mlirValue =

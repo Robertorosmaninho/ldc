@@ -84,6 +84,11 @@ extern cl::opt<bool> linkonceTemplates;
 extern cl::opt<bool> disableLinkerStripDead;
 extern cl::opt<unsigned char> defaultToHiddenVisibility;
 extern cl::opt<bool> noPLT;
+extern cl::opt<bool, true> affineDialect;
+extern cl::opt<bool, true> llvmDialect;
+extern cl::opt<bool, true> llvmIr;
+extern cl::opt<bool, true> runJIT;
+extern cl::opt<bool, true> enableOpt;
 
 // Math options
 extern bool fFastMath;

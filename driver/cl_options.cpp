@@ -464,6 +464,31 @@ cl::opt<bool> noPLT(
     "fno-plt", cl::ZeroOrMore,
     cl::desc("Do not use the PLT to make function calls"));
 
+cl::opt<bool, true> affineDialect(
+    "affineDialect", cl::ZeroOrMore,
+    cl::desc("Translates D dialect to Affine + Std dialect"),
+    cl::location(global.params.affineDialect));
+
+cl::opt<bool, true> llvmDialect(
+    "llvmDialect", cl::ZeroOrMore,
+    cl::desc("Translates D Affine + Std dialect to LLVM dialect"),
+    cl::location(global.params.llvmDialect));
+
+cl::opt<bool, true> llvmIr(
+    "llvmIr", cl::ZeroOrMore,
+    cl::desc("Codegen LLVM IR from LLVM dialect"),
+    cl::location(global.params.llvmIr));
+
+cl::opt<bool, true> runJIT(
+    "runJIT", cl::ZeroOrMore,
+    cl::desc("Run the LLVM IR created with MLIR Framework using the LLVM JIT "
+             "Compiler"), cl::location(global.params.runJIT));
+
+cl::opt<bool, true> enableOpt(
+    "enableOpt", cl::ZeroOrMore,
+    cl::desc("Run optimizations on MLIR dialects"),
+    cl::location(global.params.enableOpt));
+
 // Math options
 bool fFastMath; // Storage for the dynamically created ffast-math option.
 llvm::FastMathFlags defaultFMF;

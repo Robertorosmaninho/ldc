@@ -26,6 +26,14 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
+#include "mlir/ExecutionEngine/ExecutionEngine.h"
+#include "mlir/ExecutionEngine/OptUtils.h"
+#include "mlir/Target/LLVMIR.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Function.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/FormattedStream.h"
 #endif
 #include "gen/dynamiccompile.h"
 #include "gen/logger.h"
@@ -74,7 +82,7 @@ createAndSetDiagnosticsOutputFile(IRState &irs, llvm::LLVMContext &ctx,
     // If there is instrumentation data available, also output function hotness
     const bool withHotness = opts::isUsingPGOProfile();
 
-#if   LDC_LLVM_VER >= 1100
+#if LDC_LLVM_VER >= 1100
     auto remarksFileOrError = llvm::setupLLVMOptimizationRemarks(
 #elif LDC_LLVM_VER >= 900
         auto remarksFileOrError = llvm::setupOptimizationRemarks(
@@ -392,8 +400,9 @@ void CodeGenerator::emitMLIR(Module *m) {
 
   mlir::registerPassManagerCLOptions();
   mlir::OwningModuleRef module = ldc_mlir::mlirGen(mlirContext_, m);
-  if(!module){
-    const auto llpath = replaceExtensionWith(global.mlir_ext, m->objfile.toChars());
+  if (!module) {
+    const auto llpath =
+        replaceExtensionWith(global.mlir_ext, m->objfile.toChars());
     IF_LOG Logger::println("Error generating MLIR:'%s'", llpath.c_str());
     fatal();
   }
@@ -405,55 +414,153 @@ void CodeGenerator::emitMLIR(Module *m) {
   }
 }
 
+int runJit(mlir::ModuleOp module) {
+  // Initialize LLVM targets.
+  llvm::InitializeNativeTarget();
+  llvm::InitializeNativeTargetAsmPrinter();
+
+  // An optimization pipeline to use within the execution engine.
+  auto optPipeline = mlir::makeOptimizingTransformer(
+      /*optLevel=*/0 ? 3 : 0, /*sizeLevel=*/0,
+      /*targetMachine=*/nullptr);
+
+  // Create an MLIR execution engine. The execution engine eagerly JIT-compiles
+  // the module.
+  auto maybeEngine = mlir::ExecutionEngine::create(module, optPipeline);
+  assert(maybeEngine && "failed to construct an execution engine");
+  auto &engine = maybeEngine.get();
+
+  // Invoke the JIT-compiled function.
+  auto invocationResult = engine->invoke("main");
+  if (invocationResult) {
+    llvm::errs() << "JIT invocation failed\n";
+    return -1;
+  }
+
+  return 0;
+}
+
+void emitLLVMIR(mlir::ModuleOp module, const char *filename) {
+  auto llvmModule = mlir::translateModuleToLLVMIR(module);
+  if (!llvmModule) {
+    llvm::errs() << "Failed to emit LLVM IR\n";
+    fatal();
+  }
+
+  bool enableOpt = global.params.enableOpt;
+
+  // Initialize LLVM targets.
+  llvm::InitializeNativeTarget();
+  llvm::InitializeNativeTargetAsmPrinter();
+  mlir::ExecutionEngine::setupTargetTriple(llvmModule.get());
+
+  /// Optionally run an optimization pipeline over the llvm module.
+  auto optPipeline = mlir::makeOptimizingTransformer(
+      /*optLevel=*/enableOpt ? 3 : 0, /*sizeLevel=*/0,
+      /*targetMachine=*/nullptr);
+  if (auto err = optPipeline(llvmModule.get())) {
+    llvm::errs() << "Failed to optimize LLVM IR " << err << "\n";
+    fatal();
+  }
+
+  // llvm::errs() << *llvmModule << "\n";
+
+  if (llvmModule) {
+    llvm::SmallString<128> buffer(filename);
+    llvm::sys::path::replace_extension(
+        buffer, llvm::StringRef(global.bc_ext.ptr, global.bc_ext.length));
+    std::error_code errinfo;
+    const auto bcpath = std::string(buffer.data(), buffer.size());
+    llvm::raw_fd_ostream baba(bcpath, errinfo, llvm::sys::fs::F_None);
+    const auto &M = *llvmModule;
+    llvm::WriteBitcodeToFile(M, baba);
+  }
+}
+
 void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
                                     const char *filename) {
   // Write MLIR
   if (global.params.output_mlir) {
-    const auto llpath = replaceExtensionWith(global.mlir_ext, filename);
-    Logger::println("Writting MLIR to %s\n", llpath.c_str());
+    const auto mlirpath = replaceExtensionWith(global.mlir_ext, filename);
+    Logger::println("Writting MLIR to %s\n", mlirpath.c_str());
     std::error_code errinfo;
-    llvm::raw_fd_ostream aos(llpath, errinfo, llvm::sys::fs::F_None);
+    llvm::raw_fd_ostream aos(mlirpath, errinfo, llvm::sys::fs::F_None);
 
     if (aos.has_error()) {
-      error(Loc(), "Cannot write MLIR file '%s': %s", llpath.c_str(),
+      error(Loc(), "Cannot write MLIR file '%s': %s", mlirpath.c_str(),
             errinfo.message().c_str());
       fatal();
     }
 
     mlir::PassManager pm(&mlirContext_);
- //   pm.addPass(mlir::createInlinerPass());
+    //   pm.addPass(mlir::createInlinerPass());
 
     // Apply any generic pass manager command line options and run the pipeline.
     mlir::applyPassManagerCLOptions(pm);
 
-    mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
-    optPM.addPass(mlir::createCanonicalizerPass());
-    //optPM.addPass(mlir::createCSEPass());
+    // TODO:Needs to set a flag to lowering D->MLIR->Affine+std
+    bool isLoweringToAffine = global.params.affineDialect;
+    bool isLoweringToLLVM = global.params.llvmDialect;
+    bool printLLVMIR = global.params.llvmIr;
+    bool enableJIT = global.params.runJIT;
+    bool enableOpt = global.params.enableOpt;
 
-    //TODO:Needs to set a flag to lowering D->MLIR->Affine+std
-    bool isLoweringToAffine = true;
-    if(isLoweringToAffine){
-      pm.addPass(mlir::D::createLowerToAffinePass());
+    if (enableOpt || isLoweringToAffine) {
+      // Inline all functions into main and then delete them.
+      pm.addPass(mlir::createInlinerPass());
 
-      //TODO: Needs to set a flag to enaple opt
-      //  bool enableOpt = 1;
-      //  if (enableOpt) {
-          optPM.addPass(mlir::createLoopFusionPass());
-          optPM.addPass(mlir::createMemRefDataFlowOptPass());
-      //  }
+      mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
+      optPM.addPass(mlir::createCanonicalizerPass());
+      optPM.addPass(mlir::createCSEPass());
 
-
-      if(mlir::failed(pm.run(module->get()))){
-        IF_LOG Logger::println("Failed on running passes!");
-        return;
+      // Add optimizations if enabled.
+      if (enableOpt) {
+        optPM.addPass(mlir::createLoopFusionPass());
+        optPM.addPass(mlir::createMemRefDataFlowOptPass());
       }
     }
-    if(!module->get()){
-      IF_LOG Logger::println("Cannot write MLIR file to '%s'", llpath.c_str());
+
+    if (isLoweringToAffine) {
+      // Finish lowering the toy IR to the LLVM dialect.
+      pm.addPass(mlir::D::createLowerToAffinePass());
+
+      mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
+      optPM.addPass(mlir::createCanonicalizerPass());
+      optPM.addPass(mlir::createCSEPass());
+
+      // Add optimizations if enabled.
+      if (enableOpt) {
+        optPM.addPass(mlir::createLoopFusionPass());
+        optPM.addPass(mlir::createMemRefDataFlowOptPass());
+      }
+    }
+
+    if (isLoweringToLLVM) {
+      // Finish lowering the toy IR to the LLVM dialect.
+      pm.addPass(mlir::D::createLowerToLLVMPass());
+    }
+
+    if (mlir::failed(pm.run(module->get()))) {
+      IF_LOG Logger::println("Failed on running passes!");
+      return;
+    }
+
+    if (!module->get()) {
+      IF_LOG Logger::println("Cannot write MLIR file to '%s'",
+                             mlirpath.c_str());
       fatal();
     }
 
     module->get().print(aos);
+
+    if (printLLVMIR) {
+      emitLLVMIR(module->get(), filename);
+    }
+
+    if (enableJIT) {
+      assert(isLoweringToLLVM);
+      runJit(module->get());
+    }
   }
 }
 
