@@ -498,7 +498,6 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
     // Apply any generic pass manager command line options and run the pipeline.
     mlir::applyPassManagerCLOptions(pm);
 
-    // TODO:Needs to set a flag to lowering D->MLIR->Affine+std
     bool isLoweringToAffine = global.params.affineDialect;
     bool isLoweringToLLVM = global.params.llvmDialect;
     bool printLLVMIR = global.params.llvmIr;
