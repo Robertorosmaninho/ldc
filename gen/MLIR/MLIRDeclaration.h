@@ -114,6 +114,8 @@ public:
   mlir::Value mlirGen(DotVarExp *dotVarExp);
   mlir::Value mlirGen(Expression *expression, int func);
   mlir::Value mlirGen(Expression *expression, mlir::Block *block = nullptr);
+  mlir::FuncOp mlirGen(FuncDeclaration *Fd);
+  mlir::FuncOp mlirGen(FuncDeclaration *Fd, bool value);
   mlir::Value mlirGen(IntegerExp *integerExp);
   mlir::Value mlirGen(MinExp *minExp = nullptr,
                       MinAssignExp *minAssignExp = nullptr);

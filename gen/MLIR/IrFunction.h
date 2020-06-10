@@ -20,14 +20,18 @@
 #include "dmd/errors.h"
 #include "dmd/expression.h"
 #include "dmd/id.h"
+#include "dmd/mangle.h"
 #include "dmd/mtype.h"
 #include "dmd/template.h"
 
 #include "gen/abi.h"
 #include "gen/irstate.h"
+#include "gen/mangling.h"
 #include "gen/logger.h"
 #include "gen/pragma.h"
 #include "gen/runtime.h"
+
+#include "ir/irfunction.h"
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/StandardOps/Ops.h"
@@ -109,13 +113,31 @@ public:
       unsigned &total, unsigned &miss);
   ~MLIRFunction();
 
-  mlir::FunctionType DtoMLIRFunctionType(FuncDeclaration *Fd, Type *thistype,
-                                         Type *nesttype);
+  mlir::FunctionType DtoMLIRFunctionType(Type *type, IrFuncTy &irFty,
+                                         Type *thistype, Type *nesttype,
+                                         FuncDeclaration *Fd);
   mlir::FunctionType DtoMLIRFunctionType(FuncDeclaration *Fd);
   mlir::Type DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration);
   mlir::Value DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration);
   mlir::IntegerType DtoMLIRSize_t();
   mlir::Type get_MLIRtype(Expression *expression, Type *type = nullptr);
+  mlir::FuncOp getMLIRFunction();
+
+  /// Set MLIR Location using D Loc info
+  mlir::Location loc(Loc loc) {
+    return builder.getFileLineColLoc(
+        builder.getIdentifier(StringRef(loc.filename)), loc.linnum,
+        loc.charnum);
+  }
+
+  /// Declare a variable in the current scope, return success if the variable
+  /// wasn't declared yet.
+  mlir::LogicalResult declare(llvm::StringRef var, const mlir::Value value) {
+    if (symbolTable.count(var))
+      return mlir::failure();
+    symbolTable.insert(var, value);
+    return mlir::success();
+  }
 };
 
 #endif
