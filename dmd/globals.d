@@ -315,6 +315,13 @@ version (IN_LLVM)
     bool fullyQualifiedObjectFiles;
     bool cleanupObjectFiles;
 
+    //MLIR stuff
+    bool affineDialect; // Translates D dialect to Affine + Std dialect
+    bool llvmDialect; // Translates D Affine + Std dialect to LLVM dialect
+    bool llvmIr; // Codegen LLVM IR from LLVM dialect
+    bool runJIT; // Run the LLVM IR created with MLIR Framework using the LLVM JIT Compiler
+    bool enableOpt; // Run optimizations on MLIR dialects
+
     // Profile-guided optimization:
     const(char)* datafileInstrProf; // Either the input or output file for PGO data
 

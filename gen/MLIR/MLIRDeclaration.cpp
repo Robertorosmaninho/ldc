@@ -619,11 +619,10 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
     assert(dve);
     FuncDeclaration *fdecl = dve->var->isFuncDeclaration();
     assert(fdecl);
-    //    MLIRFunction mlirFunc(fdecl, context, builder, symbolTable, structMap,
-    //                          _total, _miss);
-    //    mlirFunc.DtoMLIRDeclareFunction(fdecl); //TODO: This does not work
-    //    yet.
-    // TODO: Create DtoRVal and DtoLVal
+    MLIRFunction mlirFunc(fdecl, context, builder, symbolTable, structMap,
+                          _total, _miss);
+    mlirFunc.DtoMLIRDeclareFunction(fdecl); //TODO: This does not work yet.
+    //TODO: Create DtoRVal and DtoLVal
   } else {
     fnval = mlirGen(callExp->e1);
   }
@@ -661,24 +660,13 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
                                          ret_type, operands);
 }
 
-bool SizeIsGreaterThan(mlir::Type a, mlir::Type b) {
-  if ((a.isInteger(1) || a.isInteger(8) || a.isInteger(16) ||
-       a.isInteger(32)) &&
-      b.isInteger(64))
-    return true;
-  else if ((a.isInteger(1) || a.isInteger(8) || a.isInteger(16)) &&
-           b.isInteger(32))
-    return true;
-  else if ((a.isInteger(1) || a.isInteger(8)) && b.isInteger(16))
-    return true;
-  else
-    return a.isInteger(1) && b.isInteger(8);
-}
-
 mlir::Value MLIRDeclaration::mlirGen(CastExp *castExp) {
   IF_LOG Logger::print("MLIRCodeGen - CastExp: %s @ %s\n", castExp->toChars(),
-                       castExp->type->toChars());
+                       castExp->e1->toChars());
   LOG_SCOPE;
+
+  Logger::println("Cast from %s to %s", castExp->type->toChars(),
+                  castExp->to->toChars());
 
   // Getting mlir location
   mlir::Location location = loc(castExp->loc);
@@ -713,7 +701,7 @@ mlir::Value MLIRDeclaration::mlirGen(CastExp *castExp) {
   auto singletype = get_MLIRtype(castExp);
   auto type = mlir::RankedTensorType::get(size, singletype);
 
-  return builder.create<mlir::D::CastOp>(location, type, result);
+  return builder.create<mlir::D::CastOp>(location, result, type);
 }
 
 mlir::Value MLIRDeclaration::mlirGen(ConstructExp *constructExp) {
@@ -1352,9 +1340,9 @@ mlir::Value MLIRDeclaration::DtoMLIRSymbolAddress(mlir::Location loc,
       fatal();
     }
 
-      MLIRFunction DeclFunc(funcDeclaration, context, builder, symbolTable,
-                              structMap, _total, _miss);
-      DeclFunc.DtoMLIRResolveFunction(funcDeclaration);
+    MLIRFunction DeclFunc(funcDeclaration, context, builder, symbolTable,
+                          structMap, _total, _miss);
+    DeclFunc.DtoMLIRResolveFunction(funcDeclaration);
 
     //  const auto mlirValue =
     //      funcDeclaration->llvmInternal ? DtoMLIRCallee(funcDeclaration) :
