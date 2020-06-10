@@ -9,6 +9,7 @@
 
 #if LDC_MLIR_ENABLED
 #include "MLIRDeclaration.h"
+#include "llvm/ADT/APFloat.h"
 
 MLIRDeclaration::MLIRDeclaration(
     Module *m, mlir::MLIRContext &context, mlir::OpBuilder builder,
@@ -28,15 +29,20 @@ mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(Expression *exp) {
 
   // This is the actual attribute that holds the list of values for this
   // tensor literal.
-  if (auto number = exp->isIntegerExp())
+  if (auto number = exp->isIntegerExp()) {
     return mlir::DenseElementsAttr::get(dataType,
                                         llvm::makeArrayRef(number->value));
-  else if (auto real = exp->isRealExp())
-    return mlir::DenseElementsAttr::get(
-        dataType, llvm::makeArrayRef((double)real->value));
-  else
-    _miss++;
+  } else if (auto real = exp->isRealExp()) {
+    if (type.isF64()) {
+      double value = [](double Double) { return Double; }(real->value);
+      return mlir::DenseElementsAttr::get(dataType, llvm::makeArrayRef(value));
+    } else if (type.isF16() || type.isF32()) {
+      float value = [](double Double) { return Double; }(real->value);
+      return mlir::DenseElementsAttr::get(dataType, llvm::makeArrayRef(value));
+    }
+  }
 
+  _miss++;
   fatal();
 }
 
@@ -613,10 +619,11 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
     assert(dve);
     FuncDeclaration *fdecl = dve->var->isFuncDeclaration();
     assert(fdecl);
-    MLIRFunction mlirFunc(fdecl, context, builder,
-        symbolTable, _total, _miss);
-    mlirFunc.DtoMLIRDeclareFunction(fdecl); //TODO: This does not work yet.
-    //TODO: Create DtoRVal and DtoLVal
+    //    MLIRFunction mlirFunc(fdecl, context, builder, symbolTable, structMap,
+    //                          _total, _miss);
+    //    mlirFunc.DtoMLIRDeclareFunction(fdecl); //TODO: This does not work
+    //    yet.
+    // TODO: Create DtoRVal and DtoLVal
   } else {
     fnval = mlirGen(callExp->e1);
   }
@@ -636,7 +643,7 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
   }
   // Get the return type
   auto Fd = callExp->f;
-  if (!Fd->returns->empty()) {
+  if (!Fd->returns) {
     auto type = get_MLIRtype(nullptr, Fd->type);
     TypeFunction *funcType = static_cast<TypeFunction *>(Fd->type);
     auto ty = funcType->next->ty;
@@ -818,7 +825,7 @@ mlir::Value MLIRDeclaration::mlirGen(DotVarExp *dotVarExp) {
     }
     // indexing normal struct
     else if (e1type->ty == Tstruct) {
-      auto *ts = static_cast<TypeStruct *>(e1type);
+//      auto *ts = static_cast<TypeStruct *>(e1type);
       llvm::Optional<size_t> accessIndex = getMemberIndex(dotVarExp);
       if (!accessIndex) {
         emitError(location, "invalid access into struct expression");
@@ -1243,17 +1250,18 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp) {
 
   assert(varExp->var);
 
-  if (strncmp(varExp->toChars(), "writeln", 7) == 0)
-    fatal();
+ // if (strncmp(varExp->toChars(), "writeln", 7) == 0)
+ //   fatal();
 
   auto var = symbolTable.lookup(varExp->var->toChars());
   if (var)
     return var;
 
-  if (auto fd = varExp->var->isFuncLiteralDeclaration())
+ /* if (auto fd = varExp->var->isFuncLiteralDeclaration()) {
     Logger::println("Build genFuncLiteral");
-  // TODO: genFuncLiteral(fd, nullptr) -> (FuncLiteralDeclaration, FuncExp)
-
+    fd = fd->toAliasFunc();
+    MLIRFunction func = MLIRFunction()
+  }*/
   if (auto em = varExp->var->isEnumMember()) {
     IF_LOG Logger::println("Create temporary for enum member");
     // Return the value of the enum member instead of trying to take its
@@ -1344,14 +1352,14 @@ mlir::Value MLIRDeclaration::DtoMLIRSymbolAddress(mlir::Location loc,
       fatal();
     }
 
-    MLIRFunction DeclFunc(funcDeclaration, context, builder, symbolTable,
-                          _total, _miss);
-    DeclFunc.DtoMLIRResolveFunction(funcDeclaration);
+      MLIRFunction DeclFunc(funcDeclaration, context, builder, symbolTable,
+                              structMap, _total, _miss);
+      DeclFunc.DtoMLIRResolveFunction(funcDeclaration);
 
     //  const auto mlirValue =
     //      funcDeclaration->llvmInternal ? DtoMLIRCallee(funcDeclaration) :
     //      nullptr;
-
+    return DeclFunc.getMLIRFunction().getOperation()->getResult(0);
     //  return new DFuncValue(funcDeclaration, mlirValue);
   }
 
@@ -1595,6 +1603,124 @@ mlir::Type MLIRDeclaration::get_MLIRtype(Expression *expression, Type *type) {
   }
   _miss++;
   return nullptr;
+}
+
+// Create the DSymbol for an MLIR Function with as many argument as the
+// provided by Module
+mlir::FuncOp MLIRDeclaration::mlirGen(FuncDeclaration *Fd, bool level) {
+
+  // Assuming that the function will only return one value from it's type
+  llvm::SmallVector<mlir::Type, 4> ret_types;
+
+  if (!Fd->returns->empty()) {
+    auto type = get_MLIRtype(nullptr, Fd->type);
+    TypeFunction *funcType = static_cast<TypeFunction *>(Fd->type);
+    auto ty = funcType->next->ty;
+    if (ty != Tvector && ty != Tarray && ty != Tsarray && ty != Taarray) {
+      auto dataType = mlir::RankedTensorType::get(1, type);
+      ret_types.push_back(dataType);
+    } else {
+      auto tensorType = type.cast<mlir::TensorType>();
+      ret_types.push_back(tensorType);
+    }
+  }
+
+  unsigned long size = 0;
+  if (Fd->parameters)
+    size = Fd->parameters->length;
+
+  // Arguments type is uniformly a generic array.
+  llvm::SmallVector<mlir::Type, 4> arg_types;
+
+  if (size) {
+    for (auto var : *Fd->parameters) {
+      auto type = get_MLIRtype(nullptr, var->type);
+      auto ty = var->type->ty;
+      if (ty != Tvector && ty != Tarray && ty != Tsarray && ty != Taarray) {
+        auto dataType = mlir::RankedTensorType::get(1, type);
+        arg_types.emplace_back(dataType);
+      } else {
+        auto tensorType = type.cast<mlir::TensorType>();
+        arg_types.emplace_back(tensorType);
+      }
+    }
+  } else {
+    arg_types = llvm::SmallVector<mlir::Type, 4>(0, nullptr);
+  }
+
+  auto func_type = builder.getFunctionType(arg_types, ret_types);
+  auto function = mlir::FuncOp::create(loc(Fd->loc), StringRef(Fd->toChars()),
+                                       func_type, {});
+  return function;
+}
+
+/// Emit a new function and add it to the MLIR module.
+mlir::FuncOp MLIRDeclaration::mlirGen(FuncDeclaration *Fd) {
+  // Create a scope in the symbol table to hold variable declarations.
+  ScopedHashTableScope<llvm::StringRef, mlir::Value> var_scope(symbolTable);
+
+  // MLIRFunction FuncDecl(Fd, context, builder, symbolTable, structMap,
+  // total,
+  //                       miss);
+  // mlir::Type type = FuncDecl.DtoMLIRFunctionType(Fd, nullptr, nullptr);
+
+  // Create an MLIR function for the given prototype.
+  mlir::FuncOp function(mlirGen(Fd, true));
+  if (!function)
+    return nullptr;
+
+  // Let's start the body of the function now!
+  // In MLIR the entry block of the function is special: it must have the same
+  // argument list as the function itself.
+  auto &entryBlock = *function.addEntryBlock();
+
+  // Set the insertion point in the builder to the beginning of the function
+  // body, it will be used throughout the codegen to create operations in this
+  // function.
+  builder.setInsertionPointToStart(&entryBlock);
+
+  // Initialize the object to be the "visitor"
+//  MLIRStatements genStmt(module, context, builder, symbolTable, structMap,
+//                         _total, _miss);
+
+  // Setting arguments of a given function
+  unsigned long size = 0;
+  if (Fd->parameters)
+    size = Fd->parameters->length;
+  llvm::SmallVector<VarDeclarations *, 4> args(size, Fd->parameters);
+
+  // args.push_back(mlirGen())
+  auto &protoArgs = args;
+
+  // Declare all the function arguments in the symbol table.
+  for (auto name_value : llvm::zip(protoArgs, entryBlock.getArguments())) {
+    if (failed(declare(std::get<0>(name_value)->pop()->toChars(),
+                       std::get<1>(name_value))))
+      return nullptr;
+  }
+  // Emit the body of the function.
+//  if (mlir::failed(genStmt.genStatements(Fd))) {
+//    function.erase();
+//    fatal();
+//  }
+  //  function.getBody().back().back().getParentRegion()->viewGraph();
+
+  // Implicitly return void if no return statement was emitted.
+  // (this would possibly help the REPL case later)
+/*  auto LastOp = function.getBody().back().back().getName().getStringRef();
+  if (LastOp != "std.return" && LastOp != "std.br" &&
+      LastOp != "std.cond_br") {
+
+    function.getBody().back().back().dump();
+    ReturnStatement *returnStatement = Fd->returns->front();
+    if (returnStatement != nullptr)
+      genStmt.mlirGen(returnStatement);
+    else {
+      builder.create<mlir::ReturnOp>(
+          function.getBody().back().back().getLoc());
+    }
+  }*/
+  return function;
 }
 
 #endif // LDC_MLIR_ENABLED

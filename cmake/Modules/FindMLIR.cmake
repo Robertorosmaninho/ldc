@@ -60,7 +60,6 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRTransformUtils.a
                 ${MLIR_LIB_DIR}/libMLIRTransforms.a
                 )
-        message(${MLIR_LIBRARIES})
     endif ()
 
     # XXX: This function is untested and will need adjustment.
