@@ -364,110 +364,93 @@ struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// DToAffine RewritePatterns: Cast operations
+//===----------------------------------------------------------------------===//
+
 struct CastOpLowering : public OpRewritePattern<D::CastOp> {
   using OpRewritePattern<D::CastOp>::OpRewritePattern;
 
   PatternMatchResult matchAndRewrite(D::CastOp op,
                                      PatternRewriter &rewriter) const final {
-    Operation *Ops = op.getOperation();
-    // Ops->getParentRegion()->viewGraph();
-    while (Ops->getName().getStringRef() == "D.cast") {
-      Ops = Ops->getOperand(0).getDefiningOp();
-    }
-    Attribute value = Ops->getAttr("value");
-    ;
     Location loc = op.getLoc();
-    DenseElementsAttr constantValue;
-    if (value == nullptr && Ops->getNumOperands() == 2) {
-      auto type = Ops->getResult(0).getType().cast<TensorType>();
-      auto memRefType = MemRefType::get(type.getShape(), type.getElementType());
-      Ops->getResult(0).setType(memRefType);
-      auto alloc = insertAllocAndDealloc(memRefType, loc, rewriter);
-      rewriter.replaceOp(op, alloc);
-      return matchSuccess();
-    } else {
-      constantValue = value.cast<DenseElementsAttr>();
-    }
+    std::vector<Value> values;
+    values.push_back(op.getOperand());
+    values.push_back(op.getResult());
+    ArrayRef<Value> operands(values);
+    lowerOpToLoops(
+        op, operands, rewriter,
+        [loc](PatternRewriter &rewriter, ArrayRef<Value> operands,
+              ArrayRef<Value> loopIvs) {
 
-    // When lowering the constant operation, we allocate and assign the constant
-    // values to a corresponding memref allocation.
-    // auto tensorType = op.getType().cast<TensorType>();
-    auto tensorType = op.getResult().getType().cast<TensorType>();
-    auto memRefType = convertTensorToMemRef(tensorType);
-    auto alloc = insertAllocAndDealloc(memRefType, loc, rewriter);
+          Value value = operands.front();
+          Value result = operands.back();
 
-    // We will be generating constant indices up-to the largest dimension.
-    // Create these constants up-front to avoid large amounts of redundant
-    // operations.
-    auto valueShape = memRefType.getShape();
-    SmallVector<Value, 8> constantIndices;
-    for (auto i : llvm::seq<int64_t>(
-             0, *std::max_element(valueShape.begin(), valueShape.end())))
-      constantIndices.push_back(rewriter.create<ConstantIndexOp>(loc, i));
+          Type in = value.getType().cast<TensorType>().getElementType();
+          Type out = result.getType().cast<TensorType>().getElementType();
 
-    // The constant operation represents a multi-dimensional constant, so we
-    // will need to generate a store for each of the elements. The following
-    // functor recursively walks the dimensions of the constant shape,
-    // generating a store when the recursion hits the base case.
+          auto SizeIsGreaterThan = [](mlir::Type a, mlir::Type b) {
+            if ((a.isInteger(1) || a.isInteger(8) || a.isInteger(16) ||
+                 a.isInteger(32)) &&
+                b.isInteger(64))
+              return true;
+            else if ((a.isInteger(1) || a.isInteger(8) || a.isInteger(16)) &&
+                     b.isInteger(32))
+              return true;
+            else if ((a.isInteger(1) || a.isInteger(8)) && b.isInteger(16))
+              return true;
+            else
+              return a.isInteger(1) && b.isInteger(8);
+          };
 
-    SmallVector<Value, 2> indices;
-    auto elementType = constantValue.getType().getElementType();
-    if (elementType.isF16() || elementType.isF32() || elementType.isF64()) {
-      auto valueIt = constantValue.getValues<FloatAttr>().begin();
-      std::function<void(uint64_t)> storeElements = [&](uint64_t dimension) {
-        if (dimension == valueShape.size()) {
-          rewriter.create<AffineStoreOp>(
-              loc, rewriter.create<ConstantOp>(loc, *valueIt++), alloc,
-              llvm::makeArrayRef(indices));
-          return;
-        }
-        for (uint64_t i = 0, e = valueShape[dimension]; i != e; ++i) {
-          indices.push_back(constantIndices[i]);
-          storeElements(dimension + 1);
-          indices.pop_back();
-        }
-      };
+          auto isInteger = [](mlir::Type type) {
+            if (type.isInteger(1) || type.isInteger(8) || type.isInteger(16) ||
+                type.isInteger(32) || type.isInteger(64))
+              return 1;
+            else if (type.isF64() || type.isF32() || type.isF16())
+              return 2;
+            else
+              return 0;
+          };
 
-      storeElements(0);
-    } else if (elementType.isInteger(1)) {
-      auto valueIt = constantValue.getValues<BoolAttr>().begin();
-      std::function<void(uint64_t)> storeElements = [&](uint64_t dimension) {
-        if (dimension == valueShape.size()) {
-          rewriter.create<AffineStoreOp>(
-              loc, rewriter.create<ConstantOp>(loc, *valueIt++), alloc,
-              llvm::makeArrayRef(indices));
-          return;
-        }
-        for (uint64_t i = 0, e = valueShape[dimension]; i != e; ++i) {
-          indices.push_back(constantIndices[i]);
-          storeElements(dimension + 1);
-          indices.pop_back();
-        }
-      };
+          // Generate loads for the element of 'lhs' and 'rhs' at the inner
+          // loop.
+          Value loadedLhs =
+              rewriter.create<AffineLoadOp>(loc, value, loopIvs);
 
-      storeElements(0);
-    } else {
-      auto valueIt = constantValue.getValues<IntegerAttr>().begin();
-      std::function<void(uint64_t)> storeElements = [&](uint64_t dimension) {
-        if (dimension == valueShape.size()) {
-          rewriter.create<AffineStoreOp>(
-              loc, rewriter.create<ConstantOp>(loc, *valueIt++), alloc,
-              llvm::makeArrayRef(indices));
-          return;
-        }
-        for (uint64_t i = 0, e = valueShape[dimension]; i != e; ++i) {
-          indices.push_back(constantIndices[i]);
-          storeElements(dimension + 1);
-          indices.pop_back();
-        }
-      };
+          Value loadedRhs =
+              rewriter.create<AffineLoadOp>(loc, result, loopIvs);
 
-      storeElements(0);
-    }
+          Operation *NewOp = nullptr;
 
-    // Replace this operation with the generated alloc.
-    rewriter.replaceOp(op, alloc);
-    return matchSuccess();
+          if (SizeIsGreaterThan(in, out))
+            NewOp = rewriter.create<TruncateIOp>(loc, loadedLhs,
+                                                 loadedRhs.getType());
+          else if (SizeIsGreaterThan(out, in))
+            NewOp = rewriter.create<ZeroExtendIOp>(loc, loadedLhs,
+                                                   loadedRhs.getType());
+          else if ((in.isF64() && (out.isF32() || out.isF16())) ||
+                   (in.isF32() && out.isF16()))
+            NewOp = rewriter.create<FPTruncOp>(loc, loadedLhs,
+                                               loadedRhs.getType());
+          else if (((in.isF16() || out.isF32()) && out.isF64()) ||
+                   (in.isF16() && out.isF32()))
+            NewOp = rewriter.create<FPExtOp>(loc, loadedLhs,
+                                             loadedRhs.getType());
+            // FPToSIOp is only available on LLVM 11
+          else if (isInteger(in) == 2 && isInteger(out) == 1)
+            NewOp = rewriter.create<D::CastOp>(loc, loadedLhs,
+                                               loadedRhs.getType());
+          else if (isInteger(in) == 1 && isInteger(out) == 2)
+            NewOp = rewriter.create<SIToFPOp>(loc, loadedLhs,
+                                              loadedRhs.getType());
+          else
+            llvm_unreachable("Impossible to Cast Type");
+
+          return NewOp->getResult(0);
+        });
+
+    return  matchSuccess();
   }
 };
 
@@ -543,7 +526,7 @@ void DToAffineLoweringPass::runOnFunction() {
 
   target.addIllegalDialect<D::DDialect>();
   // target.addLegalOp<D::StructConstantOp>();
-  // target.addLegalOp<D::CastOp>();
+   target.addLegalOp<D::CastOp>();
 
   // Now that the conversion target has been defined, we just need to provide
   // the set of patterns that will lower the Toy operations.
