@@ -1628,6 +1628,7 @@ DValue *DtoSymbolAddress(Loc &loc, Type *type, Declaration *decl) {
 
   if (FuncDeclaration *fdecl = decl->isFuncDeclaration()) {
     Logger::println("FuncDeclaration");
+    auto name = fdecl->toChars();
     fdecl = fdecl->toAliasFunc();
     if (fdecl->llvmInternal == LLVMinline_asm) {
       // TODO: Is this needed? If so, what about other intrinsics?

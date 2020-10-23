@@ -116,6 +116,7 @@ public:
   mlir::Value mlirGen(Expression *expression, mlir::Block *block = nullptr);
   mlir::FuncOp mlirGen(FuncDeclaration *Fd);
   mlir::FuncOp mlirGen(FuncDeclaration *Fd, bool value);
+  mlir::Attribute mlirGen(IndexExp *indexExp);
   mlir::Value mlirGen(IntegerExp *integerExp);
   mlir::Value mlirGen(MinExp *minExp = nullptr,
                       MinAssignExp *minAssignExp = nullptr);
@@ -123,10 +124,12 @@ public:
                       ModAssignExp *modAssignExp = nullptr);
   mlir::Value mlirGen(MulExp *mulExp = nullptr,
                       MulAssignExp *mulAssignExp = nullptr);
+  mlir::Value mlirGen(NewExp *newExp);
   mlir::Value mlirGen(OrExp *orExp = nullptr,
                       OrAssignExp *orAssignExp = nullptr);
   mlir::Value mlirGen(PostExp *postExp);
   mlir::Value mlirGen(RealExp *realExp);
+  mlir::Value mlirGen(SliceExp *sliceExp);
   mlir::Value mlirGen(StringExp *stringExp);
   mlir::Value mlirGen(StructLiteralExp *structLiteralExp);
   mlir::Value mlirGen(VarExp *varExp);

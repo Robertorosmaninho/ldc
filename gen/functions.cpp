@@ -648,6 +648,7 @@ void DtoDeclareFunction(FuncDeclaration *fdecl, const bool willDefine) {
   }
 
   applyFuncDeclUDAs(fdecl, irFunc);
+  Logger::println("INFERNOOOOOOOOOOO ==============================");
 
   // parameter attributes
   if (!DtoIsIntrinsic(fdecl)) {

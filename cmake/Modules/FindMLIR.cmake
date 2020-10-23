@@ -77,6 +77,7 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRTranslation.a
                 ${MLIR_LIB_DIR}/libLLVMExecutionEngine.a
                 ${MLIR_LIB_DIR}/libLLVMJITLink.a
+                ${MLIR_LIB_DIR}/libLLVMObjCARCOpts.a
                 ${MLIR_LIB_DIR}/libLLVMOrcJIT.a
                 ${MLIR_LIB_DIR}/libLLVMOrcError.a
                 ${MLIR_LIB_DIR}/libLLVMRuntimeDyld.a

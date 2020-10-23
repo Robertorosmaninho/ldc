@@ -321,6 +321,9 @@ MLIRFunction::DtoMLIRFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
   // if this _Dmain() doesn't have an argument, we force it to have one
   if (isMain && f->linkage != LINKc && numExplicitDArgs == 0) {
     Type *mainargs = Type::tchar->arrayOf()->arrayOf();
+    auto type0 = get_MLIRtype(nullptr, mainargs);
+    if (!type0.template isa<mlir::TensorType>())
+      type0 = mlir::RankedTensorType::get(1, type0);
     args.push_back(get_MLIRtype(nullptr, mainargs));
     //++nextLLArgIdx;
   }
@@ -363,7 +366,10 @@ MLIRFunction::DtoMLIRFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
       }
     }
 
-    sretAttrs.push_back(get_MLIRtype(nullptr, loweredDType));
+    auto type0 = get_MLIRtype(nullptr, loweredDType);
+    if (!type0.template isa<mlir::TensorType>())
+      type0 = mlir::RankedTensorType::get(1, type0);
+    sretAttrs.push_back(type0);
     for (unsigned int j = 0; j < nextLLArgIdx; ++j)
       args.push_back(sretAttrs[j]);
 
@@ -372,7 +378,7 @@ MLIRFunction::DtoMLIRFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
 
 
 
-  functionType = mlir::FunctionType::get(args, ret, &context);
+  functionType = mlir::FunctionType::get(args, {}, &context);
 
   if (ret == nullptr) {
     ret = builder.getNoneType();
@@ -417,7 +423,6 @@ MLIRFunction::DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration) {
   // get TypeFunction*
   Type *t = funcDeclaration->type->toBasetype();
   TypeFunction *f = static_cast<TypeFunction *>(t);
-
   mlir::FuncOp vafunc = nullptr;
   /*if (DtoIsVaIntrinsic(fdecl)) {
     vafunc = DtoDeclareVaFunction(fdecl);
@@ -481,6 +486,7 @@ MLIRFunction::DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration) {
   // add func to IRFunc
   function = func;
 
+  function.dump();
   //There are not any "NonLazyBind Attribute on MLIR"
   // if (!fdecl->fbody && opts::noPLT) {
     // Add `NonLazyBind` attribute to function declarations,
@@ -512,7 +518,7 @@ MLIRFunction::DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration) {
   } */
 
   // name parameters
-  auto iarg = func.args_begin();
+//  auto iarg = func.args_begin();
 
   return nullptr;
 }

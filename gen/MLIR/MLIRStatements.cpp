@@ -221,8 +221,8 @@ mlir::LogicalResult MLIRStatements::mlirGen(ReturnStatement *returnStatement) {
 
 std::vector<mlir::Value>
 MLIRStatements::mlirGen(CompoundStatement *compoundStatement) {
-  IF_LOG Logger::println("MLIRCodeGen - CompundStatement: '%s'",
-                         compoundStatement->toChars());
+//  IF_LOG Logger::println("MLIRCodeGen - CompundStatement: '%s'",
+//                         compoundStatement->toChars());
   LOG_SCOPE
 
   std::vector<mlir::Value> arrayValue;
@@ -256,30 +256,30 @@ MLIRStatements::mlirGen(CompoundStatement *compoundStatement) {
 }
 
 std::vector<mlir::Value>
-MLIRStatements::mlirGen(ScopeStatement *scopeStatement) {
-  IF_LOG Logger::println("MLIRCodeGen - ScopeStatement: \n'%s'",
-                         scopeStatement->toChars());
+MLIRStatements::mlirGen(ScopeStatement *scope) {
+//  IF_LOG Logger::println("MLIRCodeGen - ScopeStatement: \n'%s'",
+//                         scope->statement->toChars());
   LOG_SCOPE
   std::vector<mlir::Value> arrayValue;
 
-  if (auto *compoundStatement =
-          scopeStatement->statement->isCompoundStatement()) {
+  if (auto *compoundStatement = scope->statement->isCompoundStatement())
     arrayValue = mlirGen(compoundStatement);
-  } else if (ExpStatement *expStatement =
-                 scopeStatement->statement->isExpStatement()) {
-    arrayValue.push_back(mlirGen(scopeStatement->statement->isExpStatement()));
-  } else if (IfStatement *ifStatement =
-                 scopeStatement->statement->isIfStatement()) {
+  else if (auto *expStatement = scope->statement->isExpStatement())
+    arrayValue.push_back(mlirGen(expStatement));
+  else if (auto *ifStatement = scope->statement->isIfStatement())
     mlirGen(ifStatement);
-  } else if (ForStatement *forStatement =
-                 scopeStatement->statement->isForStatement()) {
+  else if (auto *forStatement = scope->statement->isForStatement())
     mlirGen(forStatement);
-  } else if (UnrolledLoopStatement *unrolledLoopStatement =
-                 scopeStatement->statement->isUnrolledLoopStatement()) {
-    mlirGen(unrolledLoopStatement);
-  } else {
-    _miss++;
+  else if (auto *unrolledLoop = scope->statement->isUnrolledLoopStatement())
+    mlirGen(unrolledLoop);
+  else if (auto *compoundAsm = scope->statement->isCompoundAsmStatement())
+    Logger::println("CompoundAsmStatement is not implemented");
+  else if (auto scopeStatements = scope->statement->isScopeStatement()) {
+    Logger::println("=============Statement %hhu", scope->statement->stmt);
+    mlirGen(scopeStatements); //Try again
   }
+  else
+    _miss++;
 
   return arrayValue;
 }

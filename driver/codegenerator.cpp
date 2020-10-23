@@ -550,6 +550,7 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
       fatal();
     }
 
+    module->get().dump();
     module->get().print(aos);
 
     if (printLLVMIR) {

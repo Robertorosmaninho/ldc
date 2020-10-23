@@ -392,8 +392,10 @@ void D::XorOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
 void D::CallOp::build(Builder *b, OperationState &state, llvm::StringRef callee,
                       llvm::ArrayRef<Type> types,
                       llvm::ArrayRef<Value> arguments) {
-  state.addTypes(types);
-  state.addOperands(arguments);
+  if (!types.empty())
+    state.addTypes(types);
+  if (!arguments.empty())
+    state.addOperands(arguments);
   state.addAttribute("callee", b->getSymbolRefAttr(callee));
 }
 
@@ -435,6 +437,11 @@ void D::DoubleOp::build(Builder *builder, OperationState &state, Type type,
   }
 }
 
+void D::StringOp::build(Builder *builder, OperationState &state, StringRef
+stringRef) {
+  StringAttr value(builder->getStringAttr(stringRef));
+  StringOp::build(builder, state, value.getType(), value);
+}
 //===----------------------------------------------------------------------===//
 // TableGen'd op method definitions
 //===----------------------------------------------------------------------===//

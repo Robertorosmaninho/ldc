@@ -520,6 +520,14 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
    let hasFolder = 1;
 }
 
+def StringOp : D_Op<"string", [NoSideEffect]> {
+    let arguments = (ins StrAttr:$value);
+    let results = (outs AnyType);
+
+    let builders = [
+    OpBuilder<"Builder *builder, OperationState &state, StringRef string">
+    ];
+}
 ////////////////////////////////////////////////////////////////////////////////
 // Cast Operations
 ////////////////////////////////////////////////////////////////////////////////

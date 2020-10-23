@@ -460,12 +460,55 @@ struct CallOpLowering : public OpRewritePattern<D::CallOp> {
   PatternMatchResult matchAndRewrite(D::CallOp op,
                                      PatternRewriter &rewriter) const final {
 
-    auto memRefType = convertTensorToMemRef(op.getType().cast<TensorType>());
-    rewriter.replaceOpWithNewOp<mlir::CallOp>(op, op.callee(), memRefType,
+    auto funcType = op.getType().cast<FunctionType>();
+
+    funcType.dump();
+
+    auto inputType = funcType.getInputs();
+    auto resultType = funcType.getResults();
+
+ //   if (!resultType.empty())
+//      resultType.vec().front().dump();
+
+   // auto returnFuncType = inputType.front().cast<FunctionType>();
+   // returnFuncType.dump();
+
+    std::vector<Type> finalInputType;
+    std::vector<Type> finalResultType;
+
+    for (auto in : inputType) {
+     // in.dump();
+      auto value = convertTensorToMemRef(in.cast<TensorType>());
+     // value.dump();
+      finalInputType.push_back(value);
+    }
+    for (auto out : resultType) {
+    //  out.dump();
+      auto value = convertTensorToMemRef(out.cast<TensorType>());
+    //  value.dump();
+      finalResultType.push_back(convertTensorToMemRef(out.cast<TensorType>()));
+    }
+    auto returnType =
+        FunctionType::get(finalInputType, finalResultType, op.getContext());
+    returnType.dump();
+    //  auto memRefType =
+    //  convertTensorToMemRef(op.getType().cast<TensorType>());
+    rewriter.replaceOpWithNewOp<mlir::CallOp>(op, op.callee(), returnType,
                                               op.getOperands());
     return matchSuccess();
   }
 };
+
+/*struct StringOpLowering : public OpRewritePattern<D::StringOp> {
+  using OpRewritePattern<D::StringOp>::OpRewritePattern;
+
+  PatternMatchResult matchAndRewrite(D::StringOp op,
+                                     PatternRewriter &rewriter) const final {
+    auto memRefType = convertTensorToMemRef(op.getType().cast<TensorType>());
+    rewriter.replaceOpWithNewOp<mlir::ConstantOp>(op, memRefType, op.valueAttr());
+    return matchSuccess();
+  }
+};*/
 
 //===----------------------------------------------------------------------===//
 // DToAffineLoweringPass
@@ -526,7 +569,8 @@ void DToAffineLoweringPass::runOnFunction() {
 
   target.addIllegalDialect<D::DDialect>();
   // target.addLegalOp<D::StructConstantOp>();
-   target.addLegalOp<D::CastOp>();
+  target.addLegalOp<D::CastOp>();
+  //target.addLegalOp<D::StringOp>();
 
   // Now that the conversion target has been defined, we just need to provide
   // the set of patterns that will lower the Toy operations.
@@ -536,7 +580,8 @@ void DToAffineLoweringPass::runOnFunction() {
                   SubFOpLowering, MulOpLowering, MulFOpLowering, DivSOpLowering,
                   DivUOpLowering, DivFOpLowering, ModSOpLowering,
                   ModUOpLowering, ModFOpLowering, AndOpLowering, OrOpLowering,
-                  XorUOpLowering, CallOpLowering>(&getContext());
+                  XorUOpLowering, CallOpLowering>(//, StringOpLowering>(
+      &getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`

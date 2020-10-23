@@ -114,6 +114,7 @@ public:
     IF_LOG Logger::println("#### Total: '%u'", total);
     IF_LOG Logger::println("### Miss: '%u'", miss);
 
+    theModule.dump();
     return theModule;
 
   } // MLIRCodeImplementation for a given Module
@@ -218,9 +219,9 @@ private:
     // Create a scope in the symbol table to hold variable declarations.
     ScopedHashTableScope<llvm::StringRef, mlir::Value> var_scope(symbolTable);
 
-    MLIRFunction FuncDecl(Fd, context, builder, symbolTable, structMap, total,
-                          miss);
-    mlir::Type type = FuncDecl.DtoMLIRFunctionType(Fd, nullptr, nullptr);
+   // MLIRFunction FuncDecl(Fd, context, builder, symbolTable, structMap, total,
+   //                       miss);
+   // mlir::Type type = FuncDecl.DtoMLIRFunctionType(Fd, nullptr, nullptr);
 
     // Create an MLIR function for the given prototype.
     mlir::FuncOp function(mlirGen(Fd, true));
