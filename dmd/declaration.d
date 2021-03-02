@@ -193,7 +193,7 @@ extern (C++) void ObjectNotFound(Identifier id)
     fatal();
 }
 
-enum STC : long
+enum STC : ulong
 {
     undefined_          = 0L,
     static_             = (1L << 0),
@@ -254,6 +254,9 @@ enum STC : long
     // Group members are mutually exclusive (there can be only one)
     safeGroup = STC.safe | STC.trusted | STC.system,
 
+    /// Group for `in` / `out` / `ref` storage classes on parameter
+    IOR  = STC.in_ | STC.ref_ | STC.out_,
+
     TYPECTOR = (STC.const_ | STC.immutable_ | STC.shared_ | STC.wild),
     FUNCATTR = (STC.ref_ | STC.nothrow_ | STC.nogc | STC.pure_ | STC.property | STC.live |
                 STC.safeGroup),
@@ -291,7 +294,11 @@ extern (C++) abstract class Declaration : Dsymbol
     StorageClass storage_class = STC.undefined_;
     Prot protection;
     LINK linkage = LINK.default_;
-    int inuse;          // used to detect cycles
+    short inuse;          // used to detect cycles
+
+    ubyte adFlags;         // control re-assignment of AliasDeclaration (put here for packing reasons)
+      enum wasRead    = 1; // set if AliasDeclaration was read
+      enum ignoreRead = 2; // ignore any reads of AliasDeclaration
 
     // overridden symbol with pragma(mangle, "...")
     const(char)[] mangleOverride;
@@ -335,34 +342,42 @@ extern (C++) abstract class Declaration : Dsymbol
      */
     extern (D) final bool checkDisabled(Loc loc, Scope* sc, bool isAliasedDeclaration = false)
     {
-        if (storage_class & STC.disable)
+        if (!(storage_class & STC.disable))
+            return false;
+
+        if (sc.func && sc.func.storage_class & STC.disable)
+            return true;
+
+        auto p = toParent();
+        if (p && isPostBlitDeclaration())
         {
-            if (!(sc.func && sc.func.storage_class & STC.disable))
-            {
-                auto p = toParent();
-                if (p && isPostBlitDeclaration())
-                    p.error(loc, "is not copyable because it is annotated with `@disable`");
-                else
-                {
-                    // if the function is @disabled, maybe there
-                    // is an overload in the overload set that isn't
-                    if (isAliasedDeclaration)
-                    {
-                        FuncDeclaration fd = isFuncDeclaration();
-                        if (fd)
-                        {
-                            for (FuncDeclaration ovl = fd; ovl; ovl = cast(FuncDeclaration)ovl.overnext)
-                                if (!(ovl.storage_class & STC.disable))
-                                    return false;
-                        }
-                    }
-                    error(loc, "cannot be used because it is annotated with `@disable`");
-                }
-            }
+            p.error(loc, "is not copyable because it is annotated with `@disable`");
             return true;
         }
 
-        return false;
+        // if the function is @disabled, maybe there
+        // is an overload in the overload set that isn't
+        if (isAliasedDeclaration)
+        {
+            FuncDeclaration fd = isFuncDeclaration();
+            if (fd)
+            {
+                for (FuncDeclaration ovl = fd; ovl; ovl = cast(FuncDeclaration)ovl.overnext)
+                    if (!(ovl.storage_class & STC.disable))
+                        return false;
+            }
+        }
+
+        if (auto ctor = isCtorDeclaration())
+        {
+            if (ctor.isCpCtor && ctor.generated)
+            {
+                .error(loc, "Generating an `inout` copy constructor for `struct %s` failed, therefore instances of it are uncopyable", parent.toPrettyChars());
+                return true;
+            }
+        }
+        error(loc, "cannot be used because it is annotated with `@disable`");
+        return true;
     }
 
     /*************************************
@@ -705,7 +720,6 @@ extern (C++) final class AliasDeclaration : Declaration
     Dsymbol aliassym;
     Dsymbol overnext;   // next in overload list
     Dsymbol _import;    // !=null if unresolved internal alias for selective import
-    bool wasTemplateParameter; /// indicates wether the alias was created to make a template parameter visible in the scope, i.e as a member.
 
     extern (D) this(const ref Loc loc, Identifier ident, Type type)
     {
@@ -859,6 +873,11 @@ extern (C++) final class AliasDeclaration : Declaration
         //    loc.toChars(), toChars(), this, aliassym, aliassym ? aliassym.kind() : "", inuse);
         assert(this != aliassym);
         //static int count; if (++count == 10) *(char*)0=0;
+
+        // Reading the AliasDeclaration
+        if (!(adFlags & ignoreRead))
+            adFlags |= wasRead;                 // can never assign to this AliasDeclaration again
+
         if (inuse == 1 && type && _scope)
         {
             inuse = 2;
@@ -952,6 +971,13 @@ extern (C++) final class AliasDeclaration : Declaration
     override inout(AliasDeclaration) isAliasDeclaration() inout
     {
         return this;
+    }
+
+    /** Returns: `true` if this instance was created to make a template parameter
+    visible in the scope of a template body, `false` otherwise */
+    extern (D) bool isAliasedTemplateParameter() const
+    {
+        return !!(storage_class & STC.templateparameter);
     }
 
     override void accept(Visitor v)
@@ -1080,11 +1106,24 @@ extern (C++) final class OverDeclaration : Declaration
 extern (C++) class VarDeclaration : Declaration
 {
     Initializer _init;
+    FuncDeclarations nestedrefs;    // referenced by these lexically nested functions
+    Dsymbol aliassym;               // if redone as alias to another symbol
+    VarDeclaration lastVar;         // Linked list of variables for goto-skips-init detection
+    Expression edtor;               // if !=null, does the destruction of the variable
+    IntRange* range;                // if !=null, the variable is known to be within the range
+    VarDeclarations* maybes;        // STC.maybescope variables that are assigned to this STC.maybescope variable
+
+    uint endlinnum;                 // line number of end of scope that this var lives in
     uint offset;
     uint sequenceNumber;            // order the variables are declared
     __gshared uint nextSequenceNumber;   // the counter for sequenceNumber
-    FuncDeclarations nestedrefs;    // referenced by these lexically nested functions
     structalign_t alignment;
+
+    // When interpreting, these point to the value (NULL if value not determinable)
+    // The index of this variable on the CTFE stack, AdrOnStackNone if not allocated
+    enum AdrOnStackNone = ~0u;
+    uint ctfeAdrOnStack;
+
     bool isargptr;                  // if parameter that _argptr points to
     bool ctorinit;                  // it has been initialized in a ctor
     bool iscatchvar;                // this is the exception object variable in catch() clause
@@ -1099,37 +1138,21 @@ version (IN_LLVM)
 }
     bool mynew;                     // it is a class new'd with custom operator new
 
-    int canassign;                  // it can be assigned to
+    byte canassign;                  // it can be assigned to
     bool overlapped;                // if it is a field and has overlapping
     bool overlapUnsafe;             // if it is an overlapping field and the overlaps are unsafe
     bool doNotInferScope;           // do not infer 'scope' for this variable
     bool doNotInferReturn;          // do not infer 'return' for this variable
     ubyte isdataseg;                // private data for isDataseg 0 unset, 1 true, 2 false
-    Dsymbol aliassym;               // if redone as alias to another symbol
-    VarDeclaration lastVar;         // Linked list of variables for goto-skips-init detection
-    uint endlinnum;                 // line number of end of scope that this var lives in
-
-    // When interpreting, these point to the value (NULL if value not determinable)
-    // The index of this variable on the CTFE stack, AdrOnStackNone if not allocated
-    enum AdrOnStackNone = ~0u;
-    uint ctfeAdrOnStack;
-
-    Expression edtor;               // if !=null, does the destruction of the variable
-    IntRange* range;                // if !=null, the variable is known to be within the range
-
-    VarDeclarations* maybes;        // STC.maybescope variables that are assigned to this STC.maybescope variable
-
-    private bool _isAnonymous;
 
     final extern (D) this(const ref Loc loc, Type type, Identifier ident, Initializer _init, StorageClass storage_class = STC.undefined_)
+    in
     {
-        if (ident is Identifier.anonymous)
-        {
-            ident = Identifier.generateId("__anonvar");
-            _isAnonymous = true;
-        }
-        //printf("VarDeclaration('%s')\n", ident.toChars());
         assert(ident);
+    }
+    body
+    {
+        //printf("VarDeclaration('%s')\n", ident.toChars());
         super(loc, ident);
         debug
         {
@@ -1276,11 +1299,6 @@ version (IN_LLVM)
     {
         //printf("VarDeclaration::needThis(%s, x%x)\n", toChars(), storage_class);
         return isField();
-    }
-
-    override final bool isAnonymous()
-    {
-        return _isAnonymous;
     }
 
     override final bool isExport() const
@@ -1532,7 +1550,7 @@ version (IN_LLVM)
         if (!e)
         {
             .error(loc, "cannot make expression out of initializer for `%s`", toChars());
-            return new ErrorExp();
+            return ErrorExp.get();
         }
 
         e = e.copy();
@@ -1589,7 +1607,7 @@ version (IN_LLVM)
         //printf("\tfdthis = %s\n", fdthis.toChars());
         if (loc.isValid())
         {
-            if (fdthis.getLevelAndCheck(loc, sc, fdv) == fdthis.LevelError)
+            if (fdthis.getLevelAndCheck(loc, sc, fdv, this) == fdthis.LevelError)
                 return true;
         }
 

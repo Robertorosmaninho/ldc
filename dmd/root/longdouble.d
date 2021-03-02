@@ -201,8 +201,8 @@ nothrow @nogc pure:
 
     static uint dig() { return 18; }
     static uint mant_dig() { return 64; }
-    static uint max_exp() { return 16384; }
-    static uint min_exp() { return -16381; }
+    static uint max_exp() { return 16_384; }
+    static uint min_exp() { return -16_381; }
     static uint max_10_exp() { return 4932; }
     static uint min_10_exp() { return -4932; }
 }
@@ -751,13 +751,6 @@ size_t ld_sprint(char* str, int fmt, longdouble_soft x) @system
     // fmt is 'a','A','f' or 'g'
     if(fmt != 'a' && fmt != 'A')
     {
-        if (longdouble_soft(ld_readull(&x)) == x)
-        {   // ((1.5 -> 1 -> 1.0) == 1.5) is false
-            // ((1.0 -> 1 -> 1.0) == 1.0) is true
-            // see http://en.cppreference.com/w/cpp/io/c/fprintf
-            char[5] format = ['%', '#', 'L', cast(char)fmt, 0];
-            return sprintf(str, format.ptr, ld_read(&x));
-        }
         char[3] format = ['%', cast(char)fmt, 0];
         return sprintf(str, format.ptr, ld_read(&x));
     }
@@ -816,10 +809,10 @@ size_t ld_sprint(char* str, int fmt, longdouble_soft x) @system
     ld_sprint(buffer.ptr, 'a', ld_pi);
     assert(strcmp(buffer.ptr, "0x1.921fb54442d1846ap+1") == 0);
 
-    ld_sprint(buffer.ptr, 'g', longdouble_soft(2.0));
-    assert(strcmp(buffer.ptr, "2.00000") == 0);
+    auto len = ld_sprint(buffer.ptr, 'g', longdouble_soft(2.0));
+    assert(buffer[0 .. len] == "2.00000" || buffer[0 .. len] == "2"); // Win10 - 64bit
 
-    ld_sprint(buffer.ptr, 'g', longdouble_soft(1234567.89));
+    ld_sprint(buffer.ptr, 'g', longdouble_soft(1_234_567.89));
     assert(strcmp(buffer.ptr, "1.23457e+06") == 0);
 
     ld_sprint(buffer.ptr, 'g', ld_inf);

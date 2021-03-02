@@ -55,7 +55,7 @@ public:
   AArch64TargetABI() : isDarwin(global.params.targetTriple->isOSDarwin()) {}
 
   bool returnInArg(TypeFunction *tf, bool) override {
-    if (tf->isref) {
+    if (tf->isref()) {
       return false;
     }
 
@@ -68,6 +68,19 @@ public:
     }
 
     return false;
+  }
+
+  // Prefer a ref if the POD cannot be passed in registers, i.e., if
+  // IndirectByvalRewrite would be applied.
+  bool preferPassByRef(Type *t) override {
+    t = t->toBasetype();
+
+    if (!(t->ty == Tstruct || t->ty == Tsarray))
+      return false;
+
+    auto argTypes = getArgTypes(t);
+    return argTypes // not 0-sized
+        && argTypes->arguments->empty(); // cannot be passed in registers
   }
 
   bool passByVal(TypeFunction *, Type *) override { return false; }

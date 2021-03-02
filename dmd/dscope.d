@@ -119,7 +119,7 @@ struct Scope
     CPPMANGLE cppmangle = CPPMANGLE.def;
 
     /// inlining strategy for functions
-    PINLINE inlining = PINLINE.default_;
+    PragmaDeclaration inlining;
 
     /// protection for class members
     Prot protection = Prot(Prot.Kind.public_);
@@ -142,6 +142,9 @@ version (IN_LLVM)
     DocComment* lastdc;        /// documentation comment for last symbol at this scope
     uint[void*] anchorCounts;  /// lookup duplicate anchor name count
     Identifier prevAnchor;     /// qualified symbol name of last doc anchor
+
+    AliasDeclaration aliasAsg; /// if set, then aliasAsg is being assigned a new value,
+                               /// do not set wasRead for it
 
     extern (D) __gshared Scope* freelist;
 
@@ -518,8 +521,13 @@ version (IN_LLVM)
         /************************************************
          * Given the failed search attempt, try to find
          * one with a close spelling.
+         * Params:
+         *      seed = identifier to search for
+         *      cost = set to the cost, which rises with each outer scope
+         * Returns:
+         *      Dsymbol if found, null if not
          */
-        extern (D) Dsymbol scope_search_fp(const(char)[] seed, ref int cost)
+        extern (D) Dsymbol scope_search_fp(const(char)[] seed, out int cost)
         {
             //printf("scope_search_fp('%s')\n", seed);
             /* If not in the lexer's string table, it certainly isn't in the symbol table.
@@ -584,7 +592,7 @@ version (IN_LLVM)
         else if (ident == Id.unsigned)
             tok = TOK.uns32;
         else if (ident == Id.wchar_t)
-            tok = global.params.isWindows ? TOK.wchar_ : TOK.dchar_;
+            tok = global.params.targetOS == TargetOS.Windows ? TOK.wchar_ : TOK.dchar_;
         else
             return null;
         return Token.toChars(tok);
@@ -676,45 +684,6 @@ version (IN_LLVM)
             //if (++i == 10)
             //    assert(0);
         }
-    }
-
-    extern (D) this(ref Scope sc)
-    {
-        this._module = sc._module;
-        this.scopesym = sc.scopesym;
-        this.enclosing = sc.enclosing;
-        this.parent = sc.parent;
-        this.sw = sc.sw;
-        this.tryBody = sc.tryBody;
-        this.tf = sc.tf;
-        this.os = sc.os;
-        this.tinst = sc.tinst;
-        this.minst = sc.minst;
-        this.sbreak = sc.sbreak;
-        this.scontinue = sc.scontinue;
-        this.fes = sc.fes;
-        this.callsc = sc.callsc;
-        this.aligndecl = sc.aligndecl;
-        this.func = sc.func;
-        this.slabel = sc.slabel;
-        this.linkage = sc.linkage;
-        this.cppmangle = sc.cppmangle;
-        this.inlining = sc.inlining;
-        this.protection = sc.protection;
-        this.explicitProtection = sc.explicitProtection;
-        this.stc = sc.stc;
-        this.depdecl = sc.depdecl;
-        this.inunion = sc.inunion;
-        this.nofree = sc.nofree;
-        this.inLoop = sc.inLoop;
-        this.intypeof = sc.intypeof;
-        this.lastVar = sc.lastVar;
-        this.ctorflow = sc.ctorflow;
-        this.flags = sc.flags;
-        this.lastdc = sc.lastdc;
-        this.anchorCounts = sc.anchorCounts;
-        this.prevAnchor = sc.prevAnchor;
-        this.userAttribDecl = sc.userAttribDecl;
     }
 
     structalign_t alignment()

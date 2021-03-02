@@ -28,7 +28,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
@@ -38,13 +37,10 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
-
-#if LDC_LLVM_VER >= 500
-#include "llvm/Support/KnownBits.h"
-#endif
 
 using namespace llvm;
 
@@ -118,21 +114,19 @@ public:
 
   // Analyze the current call, filling in some fields. Returns true if
   // this is an allocation we can stack-allocate.
-  virtual bool analyze(CallSite CS, const Analysis &A) = 0;
+  virtual bool analyze(LLCallBasePtr CB, const Analysis &A) = 0;
 
   // Returns the alloca to replace this call.
   // It will always be inserted before the call.
-  virtual Value *promote(CallSite CS, IRBuilder<> &B, const Analysis &A) {
+  virtual Value *promote(LLCallBasePtr CB, IRBuilder<> &B, const Analysis &A) {
     NumGcToStack++;
 
-    auto &BB = CS.getCaller()->getEntryBlock();
+    auto &BB = CB->getCaller()->getEntryBlock();
     Instruction *Begin = &(*BB.begin());
 
     // FIXME: set alignment on alloca?
     return new AllocaInst(Ty,
-#if LDC_LLVM_VER >= 500
                           BB.getModule()->getDataLayout().getAllocaAddrSpace(),
-#endif
                           ".nongc_mem", Begin);
   }
 
@@ -155,19 +149,11 @@ static bool isKnownLessThan(Value *Val, uint64_t Limit, const Analysis &A) {
   if (Bits > BitsLimit) {
     APInt Mask = APInt::getLowBitsSet(Bits, BitsLimit);
     Mask.flipAllBits();
-#if LDC_LLVM_VER >= 500
     KnownBits Known(Bits);
     computeKnownBits(Val, Known, A.DL);
     if ((Known.Zero & Mask) != Mask) {
       return false;
     }
-#else
-    APInt KnownZero(Bits, 0), KnownOne(Bits, 0);
-    computeKnownBits(Val, KnownZero, KnownOne, A.DL);
-    if ((KnownZero & Mask) != Mask) {
-      return false;
-    }
-#endif
   }
 
   return true;
@@ -180,8 +166,8 @@ public:
   TypeInfoFI(ReturnType::Type returnType, unsigned tiArgNr)
       : FunctionInfo(returnType), TypeInfoArgNr(tiArgNr) {}
 
-  bool analyze(CallSite CS, const Analysis &A) override {
-    Value *TypeInfo = CS.getArgument(TypeInfoArgNr);
+  bool analyze(LLCallBasePtr CB, const Analysis &A) override {
+    Value *TypeInfo = CB->getArgOperand(TypeInfoArgNr);
     Ty = A.getTypeFor(TypeInfo);
     if (!Ty) {
       return false;
@@ -201,12 +187,12 @@ public:
       : TypeInfoFI(returnType, tiArgNr), ArrSizeArgNr(arrSizeArgNr),
         Initialized(initialized) {}
 
-  bool analyze(CallSite CS, const Analysis &A) override {
-    if (!TypeInfoFI::analyze(CS, A)) {
+  bool analyze(LLCallBasePtr CB, const Analysis &A) override {
+    if (!TypeInfoFI::analyze(CB, A)) {
       return false;
     }
 
-    arrSize = CS.getArgument(ArrSizeArgNr);
+    arrSize = CB->getArgOperand(ArrSizeArgNr);
 
     // Extract the element type from the array type.
     const StructType *ArrTy = dyn_cast<StructType>(Ty);
@@ -230,17 +216,17 @@ public:
     return true;
   }
 
-  Value *promote(CallSite CS, IRBuilder<> &B, const Analysis &A) override {
-    IRBuilder<> &Builder(B);
+  Value *promote(LLCallBasePtr CB, IRBuilder<> &B, const Analysis &A) override {
     // If the allocation is of constant size it's best to put it in the
     // entry block, so do so if we're not already there.
     // For dynamically-sized allocations it's best to avoid the overhead
     // of allocating them if possible, so leave those where they are.
     // While we're at it, update statistics too.
+    const IRBuilderBase::InsertPointGuard savedInsertPoint(B);
     if (isa<Constant>(arrSize)) {
-      BasicBlock &Entry = CS.getCaller()->getEntryBlock();
-      if (Builder.GetInsertBlock() != &Entry) {
-        Builder.SetInsertPoint(&Entry, Entry.begin());
+      BasicBlock &Entry = CB->getCaller()->getEntryBlock();
+      if (B.GetInsertBlock() != &Entry) {
+        B.SetInsertPoint(&Entry, Entry.begin());
       }
       NumGcToStack++;
     } else {
@@ -248,9 +234,9 @@ public:
     }
 
     // Convert array size to 32 bits if necessary
-    Value *count = Builder.CreateIntCast(arrSize, Builder.getInt32Ty(), false);
+    Value *count = B.CreateIntCast(arrSize, B.getInt32Ty(), false);
     AllocaInst *alloca =
-        Builder.CreateAlloca(Ty, count, ".nongc_mem"); // FIXME: align?
+        B.CreateAlloca(Ty, count, ".nongc_mem"); // FIXME: align?
 
     if (Initialized) {
       // For now, only zero-init is supported.
@@ -263,11 +249,11 @@ public:
     }
 
     if (ReturnType == ReturnType::Array) {
-      Value *arrStruct = llvm::UndefValue::get(CS.getType());
-      arrStruct = Builder.CreateInsertValue(arrStruct, arrSize, 0);
+      Value *arrStruct = llvm::UndefValue::get(CB->getType());
+      arrStruct = B.CreateInsertValue(arrStruct, arrSize, 0);
       Value *memPtr =
-          Builder.CreateBitCast(alloca, PointerType::getUnqual(B.getInt8Ty()));
-      arrStruct = Builder.CreateInsertValue(arrStruct, memPtr, 1);
+          B.CreateBitCast(alloca, PointerType::getUnqual(B.getInt8Ty()));
+      arrStruct = B.CreateInsertValue(arrStruct, memPtr, 1);
       return arrStruct;
     }
 
@@ -278,18 +264,17 @@ public:
 // FunctionInfo for _d_allocclass
 class AllocClassFI : public FunctionInfo {
 public:
-  bool analyze(CallSite CS, const Analysis &A) override {
-    if (CS.arg_size() != 1) {
+  bool analyze(LLCallBasePtr CB, const Analysis &A) override {
+    if (CB->arg_size() != 1) {
       return false;
     }
-    Value *arg = CS.getArgument(0)->stripPointerCasts();
+    Value *arg = CB->getArgOperand(0)->stripPointerCasts();
     GlobalVariable *ClassInfo = dyn_cast<GlobalVariable>(arg);
     if (!ClassInfo) {
       return false;
     }
 
-    std::string metaname = CD_PREFIX;
-    metaname += ClassInfo->getName();
+    const auto metaname = getMetadataName(CD_PREFIX, ClassInfo);
 
     NamedMDNode *meta = A.M.getNamedMetadata(metaname);
     if (!meta) {
@@ -336,12 +321,12 @@ class UntypedMemoryFI : public FunctionInfo {
   Value *SizeArg;
 
 public:
-  bool analyze(CallSite CS, const Analysis &A) override {
-    if (CS.arg_size() < SizeArgNr + 1) {
+  bool analyze(LLCallBasePtr CB, const Analysis &A) override {
+    if (CB->arg_size() < SizeArgNr + 1) {
       return false;
     }
 
-    SizeArg = CS.getArgument(SizeArgNr);
+    SizeArg = CB->getArgOperand(SizeArgNr);
 
     // If the user explicitly disabled the limits, don't even check
     // whether the allocated size fits in 32 bits. This could cause
@@ -355,21 +340,21 @@ public:
     }
 
     // Should be i8.
-    Ty = CS.getType()->getContainedType(0);
+    Ty = CB->getType()->getContainedType(0);
     return true;
   }
 
-  Value *promote(CallSite CS, IRBuilder<> &B, const Analysis &A) override {
-    IRBuilder<> &Builder(B);
+  Value *promote(LLCallBasePtr CB, IRBuilder<> &B, const Analysis &A) override {
     // If the allocation is of constant size it's best to put it in the
     // entry block, so do so if we're not already there.
     // For dynamically-sized allocations it's best to avoid the overhead
     // of allocating them if possible, so leave those where they are.
     // While we're at it, update statistics too.
+    const IRBuilderBase::InsertPointGuard savedInsertPoint(B);
     if (isa<Constant>(SizeArg)) {
-      BasicBlock &Entry = CS.getCaller()->getEntryBlock();
-      if (Builder.GetInsertBlock() != &Entry) {
-        Builder.SetInsertPoint(&Entry, Entry.begin());
+      BasicBlock &Entry = CB->getCaller()->getEntryBlock();
+      if (B.GetInsertBlock() != &Entry) {
+        B.SetInsertPoint(&Entry, Entry.begin());
       }
       NumGcToStack++;
     } else {
@@ -377,11 +362,11 @@ public:
     }
 
     // Convert array size to 32 bits if necessary
-    Value *count = Builder.CreateIntCast(SizeArg, Builder.getInt32Ty(), false);
+    Value *count = B.CreateIntCast(SizeArg, B.getInt32Ty(), false);
     AllocaInst *alloca =
-        Builder.CreateAlloca(Ty, count, ".nongc_mem"); // FIXME: align?
+        B.CreateAlloca(Ty, count, ".nongc_mem"); // FIXME: align?
 
-    return Builder.CreateBitCast(alloca, CS.getType());
+    return B.CreateBitCast(alloca, CB->getType());
   }
 
   explicit UntypedMemoryFI(unsigned sizeArgNr)
@@ -444,27 +429,25 @@ GarbageCollect2Stack::GarbageCollect2Stack()
   KnownFunctions["_d_allocmemory"] = &AllocMemory;
 }
 
-static void RemoveCall(CallSite CS, const Analysis &A) {
+static void RemoveCall(LLCallBasePtr CB, const Analysis &A) {
   // For an invoke instruction, we insert a branch to the normal target BB
   // immediately before it. Ideally, we would find a way to not invalidate
   // the dominator tree here.
-  Instruction *inst = CS.getInstruction();
-  if (InvokeInst *Invoke = dyn_cast<InvokeInst>(inst)) {
+  if (auto Invoke = dyn_cast<InvokeInst>(static_cast<Instruction *>(CB))) {
     BranchInst::Create(Invoke->getNormalDest(), Invoke);
-    Invoke->getUnwindDest()->removePredecessor(CS->getParent());
+    Invoke->getUnwindDest()->removePredecessor(CB->getParent());
   }
 
   // Remove the runtime call.
   if (A.CGNode) {
 
 #if LDC_LLVM_VER >= 900
-    A.CGNode->removeCallEdgeFor(*cast<CallBase>(CS.getInstruction()));
-
+    A.CGNode->removeCallEdgeFor(*CB);
 #else
-    A.CGNode->removeCallEdgeFor(CS);
+    A.CGNode->removeCallEdgeFor(CB);
 #endif
   }
-  CS->eraseFromParent();
+  static_cast<Instruction *>(CB)->eraseFromParent();
 }
 
 static bool
@@ -498,13 +481,20 @@ bool GarbageCollect2Stack::runOnFunction(Function &F) {
 
       // Ignore non-calls.
       Instruction *Inst = &(*(I++));
-      CallSite CS(Inst);
-      if (!CS.getInstruction()) {
+#if LDC_LLVM_VER >= 800
+      auto CB = dyn_cast<CallBase>(Inst);
+      if (!CB) {
         continue;
       }
+#else
+      LLCallBasePtr CB(Inst);
+      if (!CB->getInstruction()) {
+        continue;
+      }
+#endif
 
       // Ignore indirect calls and calls to non-external functions.
-      Function *Callee = CS.getCalledFunction();
+      Function *Callee = CB->getCalledFunction();
       if (Callee == nullptr || !Callee->isDeclaration() ||
           !Callee->hasExternalLinkage()) {
         continue;
@@ -518,16 +508,16 @@ bool GarbageCollect2Stack::runOnFunction(Function &F) {
 
       FunctionInfo *info = OMI->getValue();
 
-      if (Inst->use_empty()) {
+      if (static_cast<Instruction *>(CB)->use_empty()) {
         Changed = true;
         NumDeleted++;
-        RemoveCall(CS, A);
+        RemoveCall(CB, A);
         continue;
       }
 
-      LLVM_DEBUG(errs() << "GarbageCollect2Stack inspecting: " << *Inst);
+      LLVM_DEBUG(errs() << "GarbageCollect2Stack inspecting: " << *CB);
 
-      if (!info->analyze(CS, A)) {
+      if (!info->analyze(CB, A)) {
         continue;
       }
 
@@ -537,7 +527,7 @@ bool GarbageCollect2Stack::runOnFunction(Function &F) {
           continue;
         }
       } else {
-        if (!isSafeToStackAllocate(originalI, Inst, DT, RemoveTailCallInsts)) {
+        if (!isSafeToStackAllocate(originalI, CB, DT, RemoveTailCallInsts)) {
           continue;
         }
       }
@@ -552,18 +542,18 @@ bool GarbageCollect2Stack::runOnFunction(Function &F) {
       }
 
       IRBuilder<> Builder(&BB, originalI);
-      Value *newVal = info->promote(CS, Builder, A);
+      Value *newVal = info->promote(CB, Builder, A);
 
       LLVM_DEBUG(errs() << "Promoted to: " << *newVal);
 
       // Make sure the type is the same as it was before, and replace all
       // uses of the runtime call with the alloca.
-      if (newVal->getType() != Inst->getType()) {
-        newVal = Builder.CreateBitCast(newVal, Inst->getType());
+      if (newVal->getType() != CB->getType()) {
+        newVal = Builder.CreateBitCast(newVal, CB->getType());
       }
-      Inst->replaceAllUsesWith(newVal);
+      static_cast<Instruction *>(CB)->replaceAllUsesWith(newVal);
 
-      RemoveCall(CS, A);
+      RemoveCall(CB, A);
     }
   }
 
@@ -577,32 +567,15 @@ llvm::Type *Analysis::getTypeFor(Value *typeinfo) const {
     return nullptr;
   }
 
-  std::string metaname = TD_PREFIX;
-  metaname += ti_global->getName();
+  const auto metaname = getMetadataName(TD_PREFIX, ti_global);
 
   NamedMDNode *meta = M.getNamedMetadata(metaname);
-  if (!meta) {
+  if (!meta || meta->getNumOperands() != 1) {
     return nullptr;
   }
 
-  MDNode *node = static_cast<MDNode *>(meta->getOperand(0));
-  if (!node) {
-    return nullptr;
-  }
-
-  if (node->getNumOperands() != TD_NumFields) {
-    return nullptr;
-  }
-
-  auto md = llvm::dyn_cast<llvm::ValueAsMetadata>(
-              node->getOperand(TD_TypeInfo).get());
-  if (md == nullptr || md->getValue()->stripPointerCasts() != ti_global) {
-    return nullptr;
-  }
-
-
-  return llvm::cast<llvm::ValueAsMetadata>(node->getOperand(TD_Type))
-      ->getType();
+  MDNode *node = meta->getOperand(0);
+  return llvm::cast<llvm::ConstantAsMetadata>(node->getOperand(0))->getType();
 }
 
 /// Returns whether Def is used by any instruction that is reachable from Alloc
@@ -834,11 +807,15 @@ bool isSafeToStackAllocate(BasicBlock::iterator Alloc, Value *V,
     switch (I->getOpcode()) {
     case Instruction::Call:
     case Instruction::Invoke: {
-      CallSite CS(I);
+#if LDC_LLVM_VER >= 800
+      auto CB = llvm::cast<CallBase>(I);
+#else
+      LLCallBasePtr CB(I);
+#endif
       // Not captured if the callee is readonly, doesn't return a copy through
       // its return value and doesn't unwind (a readonly function can leak bits
       // by throwing an exception or not depending on the input value).
-      if (CS.onlyReadsMemory() && CS.doesNotThrow() &&
+      if (CB->onlyReadsMemory() && CB->doesNotThrow() &&
           I->getType() == llvm::Type::getVoidTy(I->getContext())) {
         break;
       }
@@ -850,24 +827,17 @@ bool isSafeToStackAllocate(BasicBlock::iterator Alloc, Value *V,
       // that loading a value from a pointer does not cause the pointer to be
       // captured, even though the loaded value might be the pointer itself
       // (think of self-referential objects).
-      CallSite::arg_iterator B = CS.arg_begin(), E = CS.arg_end();
-      for (CallSite::arg_iterator A = B; A != E; ++A) {
+      auto B = CB->arg_begin(), E = CB->arg_end();
+      for (auto A = B; A != E; ++A) {
         if (A->get() == V) {
-#if LDC_LLVM_VER < 500
-          const unsigned paramHasAttr_firstArg = 1;
-#else
-          const unsigned paramHasAttr_firstArg = 0;
-#endif
-          if (!CS.paramHasAttr(A - B + paramHasAttr_firstArg,
-                               llvm::Attribute::AttrKind::NoCapture)) {
+          if (!CB->paramHasAttr(A - B, llvm::Attribute::AttrKind::NoCapture)) {
             // The parameter is not marked 'nocapture' - captured.
             return false;
           }
 
-          if (CS.isCall()) {
-            CallInst *CI = cast<CallInst>(I);
-            if (CI->isTailCall()) {
-              RemoveTailCallInsts.push_back(CI);
+          if (auto call = dyn_cast<CallInst>(static_cast<Instruction *>(CB))) {
+            if (call->isTailCall()) {
+              RemoveTailCallInsts.push_back(call);
             }
           }
         }

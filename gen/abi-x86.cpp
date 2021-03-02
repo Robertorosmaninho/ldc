@@ -19,14 +19,14 @@
 #include "ir/irfuncty.h"
 
 struct X86TargetABI : TargetABI {
-  const bool isOSX;
+  const bool isDarwin;
   const bool isMSVC;
   bool returnStructsInRegs;
   IntegerRewrite integerRewrite;
   IndirectByvalRewrite indirectByvalRewrite;
 
   X86TargetABI()
-      : isOSX(global.params.targetTriple->isMacOSX()),
+      : isDarwin(global.params.targetTriple->isOSDarwin()),
         isMSVC(global.params.targetTriple->isWindowsMSVCEnvironment()) {
     using llvm::Triple;
     auto os = global.params.targetTriple->getOS();
@@ -40,17 +40,16 @@ struct X86TargetABI : TargetABI {
       return llvm::CallingConv::C;
 
     switch (l) {
-    case LINKc:
-    case LINKobjc:
+    case LINK::c:
+    case LINK::objc:
       return llvm::CallingConv::C;
-    case LINKcpp:
+    case LINK::cpp:
       return isMSVC && fdecl && fdecl->needThis()
                  ? llvm::CallingConv::X86_ThisCall
                  : llvm::CallingConv::C;
-    case LINKd:
-    case LINKdefault:
-    case LINKpascal:
-    case LINKwindows:
+    case LINK::d:
+    case LINK::default_:
+    case LINK::windows:
       return llvm::CallingConv::X86_StdCall;
     default:
       llvm_unreachable("Unhandled D linkage type.");
@@ -59,11 +58,11 @@ struct X86TargetABI : TargetABI {
 
   std::string mangleFunctionForLLVM(std::string name, LINK l) override {
     if (global.params.targetTriple->isOSWindows()) {
-      if (l == LINKd || l == LINKdefault) {
+      if (l == LINK::d || l == LINK::default_) {
         // Prepend a 0x1 byte to prevent LLVM from applying MS stdcall mangling:
         // _D… => __D…@<paramssize>, and add extra underscore manually.
         name.insert(0, "\1_");
-      } else if (l == LINKcpp && name[0] == '?') {
+      } else if (l == LINK::cpp && name[0] == '?') {
         // Prepend a 0x1 byte to prevent LLVM from prepending the C underscore
         // for MSVC++ symbols (starting with '?').
         name.insert(0, "\1");
@@ -73,7 +72,7 @@ struct X86TargetABI : TargetABI {
   }
 
   std::string mangleVariableForLLVM(std::string name, LINK l) override {
-    if (global.params.targetTriple->isOSWindows() && l == LINKcpp &&
+    if (global.params.targetTriple->isOSWindows() && l == LINK::cpp &&
         name[0] == '?') {
       // Prepend a 0x1 byte to prevent LLVM from prepending the C underscore for
       // MSVC++ symbols (starting with '?').
@@ -83,7 +82,7 @@ struct X86TargetABI : TargetABI {
   }
 
   bool returnInArg(TypeFunction *tf, bool needsThis) override {
-    if (tf->isref)
+    if (tf->isref())
       return false;
 
     Type *rt = tf->next->toBasetype();
@@ -108,7 +107,7 @@ struct X86TargetABI : TargetABI {
     if (!externD && !returnStructsInRegs)
       return true;
 
-    const bool isMSVCpp = isMSVC && tf->linkage == LINKcpp;
+    const bool isMSVCpp = isMSVC && tf->linkage == LINK::cpp;
 
     // for non-static member functions, MSVC++ enforces sret for all structs
     if (isMSVCpp && needsThis && rt->ty == Tstruct) {
@@ -126,8 +125,9 @@ struct X86TargetABI : TargetABI {
   }
 
   bool passByVal(TypeFunction *tf, Type *t) override {
-    // indirectly by-value for non-POD args on Posix
-    if (!isMSVC && !isPOD(t))
+    // indirectly by-value for non-POD args (except for MSVC++)
+    const bool isMSVCpp = isMSVC && tf->linkage == LINK::cpp;
+    if (!isMSVCpp && !isPOD(t))
       return false;
 
     // pass all structs and static arrays with the LLVM byval attribute
@@ -147,8 +147,9 @@ struct X86TargetABI : TargetABI {
       }
     }
 
-    // Posix: non-POD args are passed indirectly by-value
-    if (!isMSVC) {
+    // non-POD args are passed indirectly by-value (except for MSVC++)
+    const bool isMSVCpp = isMSVC && fty.type->linkage == LINK::cpp;
+    if (!isMSVCpp) {
       for (auto arg : fty.args) {
         if (!arg->byref && !isPOD(arg->type))
           indirectByvalRewrite.applyTo(*arg);
@@ -206,8 +207,8 @@ struct X86TargetABI : TargetABI {
 
     // Clang does not pass empty structs, while it seems that GCC does,
     // at least on Linux x86. We don't know whether the C compiler will
-    // be Clang or GCC, so just assume Clang on OS X and G++ on Linux.
-    if (externD || !isOSX)
+    // be Clang or GCC, so just assume Clang on Darwin and G++ on Linux.
+    if (externD || !isDarwin)
       return;
 
     size_t i = 0;
@@ -247,7 +248,7 @@ struct X86TargetABI : TargetABI {
 
   const char *objcMsgSendFunc(Type *ret, IrFuncTy &fty) override {
     // see objc/message.h for objc_msgSend selection rules
-    assert(isOSX);
+    assert(isDarwin);
     if (fty.arg_sret) {
       return "objc_msgSend_stret";
     }

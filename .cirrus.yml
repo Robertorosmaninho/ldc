@@ -4,12 +4,12 @@
 common_steps_template: &COMMON_STEPS_TEMPLATE
   install_pip_and_lit_script: |
     # Install pip
-    curl --max-time 300 --retry 3 -OL https://bootstrap.pypa.io/get-pip.py
+    curl --max-time 300 --retry 3 -OL https://bootstrap.pypa.io/2.7/get-pip.py
     python get-pip.py --user
     rm get-pip.py
     # Install lit
     python -m pip install --user lit
-    python -c "import lit; lit.main();" --version . | head -n 1
+    python -c "import lit.main; lit.main.main();" --version . | head -n 1
   clone_submodules_script: |
     cd $CIRRUS_WORKING_DIR
     git submodule update --init --depth $CIRRUS_CLONE_DEPTH
@@ -27,6 +27,7 @@ common_steps_template: &COMMON_STEPS_TEMPLATE
       -DD_COMPILER=$PWD/../host-ldc/bin/ldmd2 \
       -DCMAKE_INSTALL_PREFIX=$installDir \
       -DINCLUDE_INSTALL_DIR=$installDir/import \
+      -DLDC_LINK_MANUALLY=OFF \
       "${extraFlags[@]}"
     ninja -j$PARALLELISM all ldc2-unittest all-test-runners
     bin/ldc2 -version
@@ -41,7 +42,7 @@ common_steps_template: &COMMON_STEPS_TEMPLATE
       cd $CIRRUS_WORKING_DIR/../build
       DMD_TESTSUITE_MAKE_ARGS=-j$PARALLELISM ctest -V -R dmd-testsuite
     run_defaultlib_tests_script: |
-      # Run defaultlib unittests & druntime stand-alone tests
+      # Run defaultlib unittests & druntime integration tests
       cd $CIRRUS_WORKING_DIR/../build
       ctest -j$PARALLELISM --output-on-failure -E "dmd-testsuite|ldc2-unittest|lit-tests"
 
@@ -53,16 +54,20 @@ install_ubuntu_prerequisites_template: &INSTALL_UBUNTU_PREREQUISITES_TEMPLATE
     cd $CIRRUS_WORKING_DIR/..
     nproc
     export DEBIAN_FRONTEND=noninteractive
-    dpkg --add-architecture i386
+    if [[ "$EXTRA_CMAKE_FLAGS" = *-DMULTILIB?ON* ]]; then
+      dpkg --add-architecture i386
+      gcc_pkg="g++-multilib"
+      libcurl_pkg="libcurl4 libcurl4:i386"
+    else
+      gcc_pkg="g++"
+      libcurl_pkg="libcurl4"
+    fi
     apt-get -q update
     apt-get -yq install \
-      git-core cmake ninja-build g++-multilib \
+      git-core cmake ninja-build $gcc_pkg \
       llvm-dev zlib1g-dev libclang-common-$LIBCLANG_COMMON_VERSION-dev \
-      libcurl4 libcurl4:i386 \
-      curl gdb python tzdata unzip zip \
+      $libcurl_pkg curl gdb python tzdata unzip zip \
       $EXTRA_APT_PACKAGES
-    # Use ld.gold per default, so that LTO is tested
-    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.gold 99
     # Download & extract host LDC
     curl --max-time 300 --retry 3 -L -o ldc2.tar.xz https://github.com/ldc-developers/ldc/releases/download/v$HOST_LDC_VERSION/ldc2-$HOST_LDC_VERSION-linux-x86_64.tar.xz
     mkdir host-ldc
@@ -76,12 +81,12 @@ install_macos_prerequisites_template: &INSTALL_MACOS_PREREQUISITES_TEMPLATE
     cd $CIRRUS_WORKING_DIR/..
     sysctl -n hw.logicalcpu
     # Download & extract CMake
-    curl --max-time 300 --retry 3 -L -o cmake.tar.gz https://github.com/Kitware/CMake/releases/download/v3.16.5/cmake-3.16.5-Darwin-x86_64.tar.gz
+    curl --max-time 300 --retry 3 -L -o cmake.tar.gz https://github.com/Kitware/CMake/releases/download/v3.19.4/cmake-3.19.4-macos-universal.tar.gz
     mkdir cmake
     tar -xf cmake.tar.gz --strip 3 -C cmake
     rm cmake.tar.gz
     # Download & extract Ninja
-    curl --max-time 300 --retry 3 -OL https://github.com/ninja-build/ninja/releases/download/v1.10.0/ninja-mac.zip
+    curl --max-time 300 --retry 3 -OL https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-mac.zip
     mkdir ninja
     tar -xf ninja-mac.zip -C ninja
     rm ninja-mac.zip
@@ -98,7 +103,7 @@ install_macos_prerequisites_template: &INSTALL_MACOS_PREREQUISITES_TEMPLATE
 
 environment:
   CIRRUS_CLONE_DEPTH: 50
-  HOST_LDC_VERSION: 1.20.1
+  HOST_LDC_VERSION: 1.24.0
 
 task:
   name: Ubuntu 18.04 x64 multilib rtSanitizers
@@ -110,13 +115,13 @@ task:
   environment:
     CI_OS: linux
     LIBCLANG_COMMON_VERSION: "6.0"
-    EXTRA_CMAKE_FLAGS: "-DMULTILIB=ON -DRT_SUPPORT_SANITIZERS=ON -DBUILD_LTO_LIBS=ON -DLDC_INSTALL_LTOPLUGIN=ON -DLDC_INSTALL_LLVM_RUNTIME_LIBS=ON"
+    EXTRA_CMAKE_FLAGS: "-DMULTILIB=ON -DRT_SUPPORT_SANITIZERS=ON -DBUILD_LTO_LIBS=ON"
     PARALLELISM: 8
   << : *INSTALL_UBUNTU_PREREQUISITES_TEMPLATE
   << : *COMMON_STEPS_TEMPLATE
 
 task:
-  name: Ubuntu rolling x64 multilib shared-libs-only gdmd
+  name: Ubuntu rolling x64 shared-libs-only gdmd
   container:
     image: ubuntu:rolling
     cpu: 8
@@ -124,45 +129,32 @@ task:
   timeout_in: 60m
   environment:
     CI_OS: linux
-    LIBCLANG_COMMON_VERSION: "10"
-    EXTRA_APT_PACKAGES: "gdmd locales"
-    EXTRA_CMAKE_FLAGS: "-DMULTILIB=ON -DBUILD_SHARED_LIBS=ON -DBUILD_LTO_LIBS=ON -DLDC_INSTALL_LTOPLUGIN=ON -DLDC_INSTALL_LLVM_RUNTIME_LIBS=ON -DD_COMPILER=gdmd"
+    LIBCLANG_COMMON_VERSION: "11"
+    EXTRA_APT_PACKAGES: "gdmd"
+    EXTRA_CMAKE_FLAGS: "-DBUILD_SHARED_LIBS=ON -DBUILD_LTO_LIBS=ON -DD_COMPILER=gdmd -DLDC_LINK_MANUALLY=ON"
     PARALLELISM: 8
+    # for gdmd:
+    LANG: C.UTF-8
   << : *INSTALL_UBUNTU_PREREQUISITES_TEMPLATE
-  setup_gdmd_script: |
-    locale-gen en_US.UTF-8
-    gdmd --version
   << : *COMMON_STEPS_TEMPLATE
 
 task:
-  name: macOS 10.15 x64
+  name: macOS 10.15 $TASK_NAME_SUFFIX
   osx_instance:
     image: catalina-xcode
   timeout_in: 60m
   environment:
     CI_OS: osx
-    LLVM_VERSION: 10.0.0
-    EXTRA_CMAKE_FLAGS: "-DBUILD_LTO_LIBS=ON"
+    LLVM_VERSION: 11.0.1
     # OS is preset to `darwin`
     OS: osx
     PATH: ${CIRRUS_WORKING_DIR}/../cmake/bin:${CIRRUS_WORKING_DIR}/../ninja:${CIRRUS_WORKING_DIR}/../llvm/bin:${PATH}
-    PARALLELISM: 4
-  << : *INSTALL_MACOS_PREREQUISITES_TEMPLATE
-  << : *COMMON_STEPS_TEMPLATE
-
-task:
-  name: macOS 10.15 x64 shared-libs-only
-  osx_instance:
-    image: catalina-xcode
-  timeout_in: 60m
-  environment:
-    CI_OS: osx
-    LLVM_VERSION: 10.0.0
-    EXTRA_CMAKE_FLAGS: "-DBUILD_SHARED_LIBS=ON -DBUILD_LTO_LIBS=ON"
-    # OS is preset to `darwin`
-    OS: osx
-    PATH: ${CIRRUS_WORKING_DIR}/../cmake/bin:${CIRRUS_WORKING_DIR}/../ninja:${CIRRUS_WORKING_DIR}/../llvm/bin:${PATH}
-    PARALLELISM: 4
+    PARALLELISM: 12
+    matrix:
+      - TASK_NAME_SUFFIX: x64
+        EXTRA_CMAKE_FLAGS: "-DBUILD_LTO_LIBS=ON"
+      - TASK_NAME_SUFFIX: x64 shared-libs-only
+        EXTRA_CMAKE_FLAGS: "-DBUILD_LTO_LIBS=ON -DBUILD_SHARED_LIBS=ON"
   << : *INSTALL_MACOS_PREREQUISITES_TEMPLATE
   << : *COMMON_STEPS_TEMPLATE
 
@@ -175,7 +167,7 @@ task:
   timeout_in: 60m
   environment:
     CI_OS: freebsd
-    EXTRA_CMAKE_FLAGS: -DBUILD_LTO_LIBS=ON -DLDC_INSTALL_LTOPLUGIN=ON -DLDC_INSTALL_LLVM_RUNTIME_LIBS=ON -DLDC_INSTALL_LLVM_RUNTIME_LIBS_OS=freebsd -DD_COMPILER_FLAGS="-flto=full -defaultlib=phobos2-ldc-lto,druntime-ldc-lto" -DEXTRA_CXXFLAGS=-flto=full
+    EXTRA_CMAKE_FLAGS: -DBUILD_LTO_LIBS=ON -DD_COMPILER_FLAGS="-flto=full -defaultlib=phobos2-ldc-lto,druntime-ldc-lto" -DEXTRA_CXXFLAGS=-flto=full
     PARALLELISM: 4
     GITHUB_TOKEN: ENCRYPTED[0955bd48c8d4e5391446fc0149d0719ad0b63df27ec9e6c180a5730a5b10dc7f28f09d1383423db158d21380ee2b022a]
     # use clang from the `llvm` ports package to be installed, incl. lld support for .deplibs (`pragma(lib, "execinfo")`)
@@ -185,7 +177,7 @@ task:
     sysctl -n hw.ncpu
     pkg install -y git cmake ninja gmake llvm bash gtar p7zip
     # Download & extract host LDC
-    curl -L -o ldc2.tar.xz https://github.com/ldc-developers/ldc/releases/download/CI/ldc2-57429428-freebsd-x86_64.tar.xz
+    curl --max-time 300 --retry 3 -L -o ldc2.tar.xz https://github.com/ldc-developers/ldc/releases/download/v$HOST_LDC_VERSION/ldc2-$HOST_LDC_VERSION-freebsd-x86_64.tar.xz
     mkdir pre-ldc
     gtar -xf ldc2.tar.xz --strip 1 -C pre-ldc
   clone_submodules_early_script: |
@@ -249,10 +241,11 @@ task:
     DMD=$PWD/installed/bin/ldmd2
     git clone --recursive https://github.com/dlang/tools.git dlang-tools
     cd dlang-tools
+    git checkout "$(cat $CIRRUS_WORKING_DIR/packaging/dlang-tools_version)"
     mkdir bin
     $DMD -w -de -dip1000 rdmd.d -of=bin/rdmd
     $DMD -w -de -dip1000 ddemangle.d -of=bin/ddemangle
-    $DMD -w -de -dip1000 DustMite/dustmite.d DustMite/splitter.d -of=bin/dustmite
+    $DMD -w -de -dip1000 DustMite/dustmite.d DustMite/splitter.d DustMite/polyhash.d -of=bin/dustmite
     cp bin/{rdmd,ddemangle,dustmite} ../installed/bin
   # Pack artifact
   pack_artifact_script: |

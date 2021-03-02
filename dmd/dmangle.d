@@ -79,7 +79,7 @@ private immutable char[TMAX] mangleChar =
     Tfunction    : 'F', // D function
     Tsarray      : 'G',
     Taarray      : 'H',
-    Tident       : 'I',
+    //              I   // in
     //              J   // out
     //              K   // ref
     //              L   // lazy
@@ -92,13 +92,13 @@ private immutable char[TMAX] mangleChar =
     Tstruct      : 'S',
     //              T   // Ttypedef
     //              U   // C function
-    //              V   // Pascal function
     //              W   // Windows function
     //              X   // variadic T t...)
     //              Y   // variadic T t,...)
     //              Z   // not variadic, end of parameters
 
     // '@' shouldn't appear anywhere in the deco'd names
+    Tident       : '@',
     Tinstance    : '@',
     Terror       : '@',
     Ttypeof      : '@',
@@ -176,13 +176,15 @@ private extern (C++) final class Mangler : Visitor
     alias visit = Visitor.visit;
 public:
     static assert(Key.sizeof == size_t.sizeof);
-    AssocArray!(Type, size_t) types;
-    AssocArray!(Identifier, size_t) idents;
+    AssocArray!(Type, size_t) types;        // Type => (offset+1) in buf
+    AssocArray!(Identifier, size_t) idents; // Identifier => (offset+1) in buf
     OutBuffer* buf;
+    Type rootType;
 
-    extern (D) this(OutBuffer* buf)
+    extern (D) this(OutBuffer* buf, Type rootType = null)
     {
         this.buf = buf;
+        this.rootType = rootType;
     }
 
     /**
@@ -228,17 +230,29 @@ public:
     */
     bool backrefType(Type t)
     {
-        if (!t.isTypeBasic())
+        if (t.isTypeBasic())
+            return false;
+
+        /**
+         * https://issues.dlang.org/show_bug.cgi?id=21591
+         *
+         * Special case for unmerged TypeFunctions: use the generic merged
+         * function type as backref cache key to avoid missed backrefs.
+         *
+         * Merging is based on mangling, so we need to avoid an infinite
+         * recursion by excluding the case where `t` is the root type passed to
+         * `mangleToBuffer()`.
+         */
+        if (t != rootType)
         {
-            auto p = types.getLvalue(t);
-            if (*p)
+            if (t.ty == Tfunction || t.ty == Tdelegate ||
+                (t.ty == Tpointer && t.nextOf().ty == Tfunction))
             {
-                writeBackRef(buf.length - *p);
-                return true;
+                t = t.merge2();
             }
-            *p = buf.length;
         }
-        return false;
+
+        return backrefImpl(types, t);
     }
 
     /**
@@ -256,13 +270,19 @@ public:
     */
     bool backrefIdentifier(Identifier id)
     {
-        auto p = idents.getLvalue(id);
+        return backrefImpl(idents, id);
+    }
+
+    private extern(D) bool backrefImpl(T)(ref AssocArray!(T, size_t) aa, T key)
+    {
+        auto p = aa.getLvalue(key);
         if (*p)
         {
-            writeBackRef(buf.length - *p);
+            const offset = *p - 1;
+            writeBackRef(buf.length - offset);
             return true;
         }
-        *p = buf.length;
+        *p = buf.length + 1;
         return false;
     }
 
@@ -370,9 +390,6 @@ public:
         case LINK.windows:
             mc = 'W';
             break;
-        case LINK.pascal:
-            mc = 'V';
-            break;
         case LINK.cpp:
             mc = 'R';
             break;
@@ -395,8 +412,11 @@ public:
 
         if (ta.isreturn && !ta.isreturninferred)
             buf.writestring("Nj");
-        else if (ta.isscope && !ta.isscopeinferred)
+        else if (ta.isScopeQual && !ta.isscopeinferred)
             buf.writestring("Nl");
+
+        if (ta.islive)
+            buf.writestring("Nm");
 
         switch (ta.trust)
         {
@@ -411,7 +431,8 @@ public:
         }
 
         // Write argument types
-        paramsToDecoBuffer(t.parameterList.parameters);
+        foreach (idx, param; t.parameterList)
+            param.accept(this);
         //if (buf.data[buf.length - 1] == '@') assert(0);
         buf.writeByte('Z' - t.parameterList.varargs); // mark end of arg list
         if (tret !is null)
@@ -451,7 +472,10 @@ public:
     {
         //printf("TypeTuple.toDecoBuffer() t = %p, %s\n", t, t.toChars());
         visit(cast(Type)t);
-        paramsToDecoBuffer(t.arguments);
+        Parameter._foreach(t.arguments, (idx, param) {
+                param.accept(this);
+                return 0;
+        });
         buf.writeByte('Z');
     }
 
@@ -574,7 +598,6 @@ public:
                     break;
                 case LINK.c:
                 case LINK.windows:
-                case LINK.pascal:
                 case LINK.objc:
                     return d.ident.toString();
                 case LINK.cpp:
@@ -838,8 +861,10 @@ public:
             {
             Lsa:
                 sa = sa.toAlias();
-                if (Declaration d = sa.isDeclaration())
+                if (sa.isDeclaration() && !sa.isOverDeclaration())
                 {
+                    Declaration d = sa.isDeclaration();
+
                     if (auto fad = d.isFuncAliasDeclaration())
                         d = fad.toAliasFunc();
                     if (d.mangleOverride)
@@ -1084,18 +1109,6 @@ public:
     }
 
     ////////////////////////////////////////////////////////////////////////////
-    void paramsToDecoBuffer(Parameters* parameters)
-    {
-        //printf("Parameter.paramsToDecoBuffer()\n");
-
-        int paramsToDecoBufferDg(size_t n, Parameter p)
-        {
-            p.accept(this);
-            return 0;
-        }
-
-        Parameter._foreach(parameters, &paramsToDecoBufferDg);
-    }
 
     override void visit(Parameter p)
     {
@@ -1106,10 +1119,15 @@ public:
         if ((p.storageClass & (STC.return_ | STC.wild)) == STC.return_ &&
             !(p.storageClass & STC.returninferred))
             buf.writestring("Nk");
-        switch (p.storageClass & (STC.in_ | STC.out_ | STC.ref_ | STC.lazy_))
+        switch (p.storageClass & (STC.IOR | STC.lazy_))
         {
         case 0:
+            break;
         case STC.in_:
+            buf.writeByte('I');
+            break;
+        case STC.in_ | STC.ref_:
+            buf.writestring("IK");
             break;
         case STC.out_:
             buf.writeByte('J');
@@ -1123,11 +1141,11 @@ public:
         default:
             debug
             {
-                printf("storageClass = x%llx\n", p.storageClass & (STC.in_ | STC.out_ | STC.ref_ | STC.lazy_));
+                printf("storageClass = x%llx\n", p.storageClass & (STC.IOR | STC.lazy_));
             }
             assert(0);
         }
-        visitWithMask(p.type, 0);
+        visitWithMask(p.type, (p.storageClass & STC.in_) ? MODFlags.const_ : 0);
     }
 }
 
@@ -1182,7 +1200,7 @@ extern (C++) void mangleToBuffer(Type t, OutBuffer* buf)
         buf.writestring(t.deco);
     else
     {
-        scope Mangler v = new Mangler(buf);
+        scope Mangler v = new Mangler(buf, t);
         v.visitWithMask(t, 0);
     }
 }
@@ -1203,25 +1221,4 @@ extern (C++) void mangleToBuffer(TemplateInstance ti, OutBuffer* buf)
 {
     scope Mangler v = new Mangler(buf);
     v.mangleTemplateInstance(ti);
-}
-
-/******************************************************************************
- * Mangle function signatures ('this' qualifier, and parameter types)
- * to check conflicts in function overloads.
- * It's different from fd.type.deco. For example, fd.type.deco would be null
- * if fd is an auto function.
- *
- * Params:
- *    buf = `OutBuffer` to write the mangled function signature to
-*     fd  = `FuncDeclaration` to mangle
- */
-void mangleToFuncSignature(ref OutBuffer buf, FuncDeclaration fd)
-{
-    auto tf = fd.type.isTypeFunction();
-
-    scope Mangler v = new Mangler(&buf);
-
-    MODtoDecoBuffer(&buf, tf.mod);
-    v.paramsToDecoBuffer(tf.parameterList.parameters);
-    buf.writeByte('Z' - tf.parameterList.varargs);
 }

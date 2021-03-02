@@ -12,6 +12,7 @@
 #include "dmd/aggregate.h"
 #include "dmd/declaration.h"
 #include "dmd/expression.h"
+#include "dmd/identifier.h"
 #include "dmd/init.h"
 #include "dmd/mtype.h"
 #include "dmd/target.h"
@@ -20,6 +21,7 @@
 #include "gen/llvmhelpers.h"
 #include "gen/logger.h"
 #include "gen/mangling.h"
+#include "gen/pragma.h"
 #include "gen/tollvm.h"
 #include "ir/irdsymbol.h"
 #include "ir/irtypeclass.h"
@@ -33,7 +35,7 @@ llvm::StructType *IrAggr::getLLStructType() {
     return llStructType;
 
   LLType *llType = DtoType(type);
-  if (auto irClassType = type->ctype->isClass())
+  if (auto irClassType = getIrType(type)->isClass())
     llType = irClassType->getMemoryLLType();
 
   llStructType = llvm::dyn_cast<LLStructType>(llType);
@@ -43,19 +45,56 @@ llvm::StructType *IrAggr::getLLStructType() {
 
 //////////////////////////////////////////////////////////////////////////////
 
-LLConstant *&IrAggr::getInitSymbol() {
-  if (init) {
-    return init;
+bool IrAggr::suppressTypeInfo() const {
+  return !global.params.useTypeInfo || !Type::dtypeinfo ||
+         aggrdecl->llvmInternal == LLVMno_typeinfo;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+LLConstant *IrAggr::getInitSymbol(bool define) {
+  if (!init) {
+    const auto irMangle = getIRMangledInitSymbolName(aggrdecl);
+
+    // Init symbols of built-in TypeInfo classes (in rt.util.typeinfo) are
+    // special.
+    auto cd = aggrdecl->isClassDeclaration();
+    const bool isBuiltinTypeInfo =
+        cd && llvm::StringRef(cd->ident->toChars()).startswith("TypeInfo_");
+
+    // Only declare the symbol if it isn't yet, otherwise the init symbol of
+    // built-in TypeInfos may clash with an existing base-typed forward
+    // declaration when compiling the rt.util.typeinfo unittests.
+    auto initGlobal = gIR->module.getGlobalVariable(irMangle);
+    if (initGlobal) {
+      assert(isBuiltinTypeInfo && !initGlobal->hasInitializer() &&
+             "existing global expected to be a built-in TypeInfo forward "
+             "declaration");
+    } else {
+      // Init symbols of built-in TypeInfos need to be kept mutable as the type
+      // is not declared as immutable on the D side, and e.g. synchronized() can
+      // be used on the implicit monitor.
+      initGlobal =
+          declareGlobal(aggrdecl->loc, gIR->module, getLLStructType(), irMangle,
+                        /*isConstant=*/!isBuiltinTypeInfo);
+    }
+
+    initGlobal->setAlignment(LLMaybeAlign(DtoAlignment(type)));
+
+    init = initGlobal;
+
+    if (!define)
+      define = defineOnDeclare(aggrdecl);
   }
 
-  // create the initZ symbol
-  const auto irMangle = getIRMangledInitSymbolName(aggrdecl);
-
-  auto initGlobal = declareGlobal(aggrdecl->loc, gIR->module, getLLStructType(),
-                                  irMangle, /*isConstant=*/true);
-  initGlobal->setAlignment(LLMaybeAlign(DtoAlignment(type)));
-
-  init = initGlobal;
+  if (define) {
+    auto initConstant = getDefaultInit();
+    auto initGlobal = llvm::dyn_cast<LLGlobalVariable>(init);
+    if (initGlobal // NOT a bitcast pointer to helper global
+        && !initGlobal->hasInitializer()) {
+      init = gIR->setGlobalVarInitializer(initGlobal, initConstant, aggrdecl);
+    }
+  }
 
   return init;
 }
@@ -141,26 +180,26 @@ IrAggr::createInitializerConstant(const VarInitMap &explicitInitializers) {
   LOG_SCOPE;
 
   llvm::SmallVector<llvm::Constant *, 16> constants;
-
   unsigned offset = 0;
-  if (type->ty == Tclass) {
+
+  auto cd = aggrdecl->isClassDeclaration();
+  IrClass *irClass = cd ? static_cast<IrClass *>(this) : nullptr;
+  if (irClass) {
     // add vtbl
-    constants.push_back(getVtblSymbol());
+    constants.push_back(irClass->getVtblSymbol());
     offset += target.ptrsize;
 
     // add monitor (except for C++ classes)
-    if (!aggrdecl->isClassDeclaration()->isCPPclass()) {
+    if (!cd->isCPPclass()) {
       constants.push_back(getNullValue(getVoidPtrType()));
       offset += target.ptrsize;
     }
   }
 
-  // Add the initializers for the member fields. While we are traversing the
-  // class hierarchy, use the opportunity to populate interfacesWithVtbls if
-  // we haven't done so previously (due to e.g. ClassReferenceExp, we can
-  // have multiple initializer constants for a single class).
+  // Add the initializers for the member fields.
+  unsigned dummy = 0;
   addFieldInitializers(constants, explicitInitializers, aggrdecl, offset,
-                       interfacesWithVtbls.empty());
+                       dummy);
 
   // tail padding?
   const size_t structsize = aggrdecl->size(Loc());
@@ -187,9 +226,10 @@ IrAggr::createInitializerConstant(const VarInitMap &explicitInitializers) {
   }
 
   // build constant
+  const bool isPacked = getIrType(type)->isAggr()->packed;
   LLStructType *llType =
       isCompatible ? llStructType
-                   : LLStructType::get(gIR->context(), types, isPacked());
+                   : LLStructType::get(gIR->context(), types, isPacked);
   llvm::Constant *c = LLConstantStruct::get(llType, constants);
   IF_LOG Logger::cout() << "final initializer: " << *c << std::endl;
   return c;
@@ -198,12 +238,12 @@ IrAggr::createInitializerConstant(const VarInitMap &explicitInitializers) {
 void IrAggr::addFieldInitializers(
     llvm::SmallVectorImpl<llvm::Constant *> &constants,
     const VarInitMap &explicitInitializers, AggregateDeclaration *decl,
-    unsigned &offset, bool populateInterfacesWithVtbls) {
+    unsigned &offset, unsigned &interfaceVtblIndex) {
 
   if (ClassDeclaration *cd = decl->isClassDeclaration()) {
     if (cd->baseClass) {
       addFieldInitializers(constants, explicitInitializers, cd->baseClass,
-                           offset, populateInterfacesWithVtbls);
+                           offset, interfaceVtblIndex);
     }
 
     // has interface vtbls?
@@ -216,14 +256,12 @@ void IrAggr::addFieldInitializers(
         offset = aligned;
       }
 
-      size_t inter_idx = interfacesWithVtbls.size();
+      IrClass *irClass = static_cast<IrClass *>(this);
       for (auto bc : *cd->vtblInterfaces) {
-        constants.push_back(getInterfaceVtblSymbol(bc, inter_idx));
+        constants.push_back(
+            irClass->getInterfaceVtblSymbol(bc, interfaceVtblIndex));
         offset += target.ptrsize;
-        inter_idx++;
-
-        if (populateInterfacesWithVtbls)
-          interfacesWithVtbls.push_back(bc);
+        ++interfaceVtblIndex;
       }
     }
   }
@@ -260,12 +298,26 @@ void IrAggr::addFieldInitializers(
 
 IrAggr *getIrAggr(AggregateDeclaration *decl, bool create) {
   if (!isIrAggrCreated(decl) && create) {
-    assert(decl->ir->irAggr == NULL);
-    decl->ir->irAggr = new IrAggr(decl);
+    assert(decl->ir->irAggr == nullptr);
+    if (auto cd = decl->isClassDeclaration()) {
+      decl->ir->irAggr = new IrClass(cd);
+    } else {
+      decl->ir->irAggr = new IrStruct(decl->isStructDeclaration());
+    }
     decl->ir->m_type = IrDsymbol::AggrType;
   }
-  assert(decl->ir->irAggr != NULL);
+  assert(decl->ir->irAggr != nullptr);
   return decl->ir->irAggr;
+}
+
+IrStruct *getIrAggr(StructDeclaration *sd, bool create) {
+  return static_cast<IrStruct *>(
+      getIrAggr(static_cast<AggregateDeclaration *>(sd), create));
+}
+
+IrClass *getIrAggr(ClassDeclaration *cd, bool create) {
+  return static_cast<IrClass *>(
+      getIrAggr(static_cast<AggregateDeclaration *>(cd), create));
 }
 
 bool isIrAggrCreated(AggregateDeclaration *decl) {

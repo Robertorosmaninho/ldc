@@ -17,6 +17,25 @@ import dmd.root.filename;
 import dmd.root.outbuffer;
 import dmd.identifier;
 
+/// Bit decoding of the TargetOS
+enum TargetOS : ubyte
+{
+    /* These are mutually exclusive; one and only one is set.
+     * Match spelling and casing of corresponding version identifiers
+     */
+    linux        = 1,
+    Windows      = 2,
+    OSX          = 4,
+    OpenBSD      = 8,
+    FreeBSD      = 0x10,
+    Solaris      = 0x20,
+    DragonFlyBSD = 0x40,
+
+    // Combination masks
+    all = linux | Windows | OSX | FreeBSD | Solaris | DragonFlyBSD,
+    Posix = linux | OSX | FreeBSD | Solaris | DragonFlyBSD,
+}
+
 template xversion(string s)
 {
     enum xversion = mixin(`{ version (` ~ s ~ `) return true; else return false; }`)();
@@ -119,10 +138,19 @@ enum JsonFieldFlags : uint
 
 enum CppStdRevision : uint
 {
-    cpp98 = 199711,
-    cpp11 = 201103,
-    cpp14 = 201402,
-    cpp17 = 201703
+    cpp98 = 1997_11,
+    cpp11 = 2011_03,
+    cpp14 = 2014_02,
+    cpp17 = 2017_03,
+    cpp20 = 2020_02,
+}
+
+/// Configuration for the C++ header generator
+enum CxxHeaderMode : uint
+{
+    none,   /// Don't generate headers
+    silent, /// Generate headers
+    verbose /// Generate headers and add comments for hidden declarations
 }
 
 // Put command line switches in here
@@ -140,6 +168,8 @@ extern (C++) struct Param
     bool vcg_ast;           // write-out codegen-ast
     bool showColumns;       // print character (column) numbers in diagnostics
     bool vtls;              // identify thread local variables
+    bool vtemplates;        // collect and list statistics on template instantiations
+    bool vtemplatesListInstances; // collect and list statistics on template instantiations origins. TODO: make this an enum when we want to list other kinds of instances
     bool vgc;               // identify gc usage
     bool vfield;            // identify non-mutable field variables
     bool vcomplex;          // identify complex/imaginary type usage
@@ -150,13 +180,7 @@ extern (C++) struct Param
     bool map;               // generate linker .map file
     bool is64bit = (size_t.sizeof == 8);  // generate 64 bit code; true by default for 64 bit dmd
     bool isLP64;            // generate code for LP64
-    bool isLinux;           // generate code for linux
-    bool isOSX;             // generate code for Mac OSX
-    bool isWindows;         // generate code for Windows
-    bool isFreeBSD;         // generate code for FreeBSD
-    bool isOpenBSD;         // generate code for OpenBSD
-    bool isDragonFlyBSD;    // generate code for DragonFlyBSD
-    bool isSolaris;         // generate code for Solaris
+    TargetOS targetOS;      // operating system to generate code for
     bool hasObjectiveC;     // target supports Objective-C
     bool mscoff = false;    // for Win32: write MsCoff object files instead of OMF
     DiagnosticReporting useDeprecated = DiagnosticReporting.inform;  // how use of deprecated features are handled
@@ -173,19 +197,21 @@ extern (C++) struct Param
     bool color;             // use ANSI colors in console output
     bool cov;               // generate code coverage data
     ubyte covPercent;       // 0..100 code coverage percentage required
+    bool ctfe_cov = false;  // generate coverage data for ctfe
     bool nofloat;           // code should not pull in floating point support
     bool ignoreUnsupportedPragmas;  // rather than error on them
     bool useModuleInfo = true;   // generate runtime module information
     bool useTypeInfo = true;     // generate runtime type information
     bool useExceptions = true;   // support exception handling
     bool noSharedAccess;         // read/write access to shared memory objects
-    bool inMeansScopeConst; // `in` means `scope const`
+    bool previewIn;         // `in` means `[ref] scope const`, accepts rvalues
     bool betterC;           // be a "better C" compiler; no dependency on D runtime
     bool addMain;           // add a default main() function
     bool allInst;           // generate code for all template instantiations
     bool fix16997;          // fix integral promotions for unary + - ~ operators
                             // https://issues.dlang.org/show_bug.cgi?id=16997
     bool fixAliasThis;      // if the current scope has an alias this, check it before searching upper scopes
+    bool inclusiveInContracts;   // 'in' contracts of overridden methods must be a superset of parent contract
     /** The --transition=safe switch should only be used to show code with
      * silent semantics changes related to @safe improvements.  It should not be
      * used to hide a feature that will have to go through deprecate-then-error
@@ -202,9 +228,9 @@ extern (C++) struct Param
                             // https://digitalmars.com/d/archives/digitalmars/D/Binding_rvalues_to_ref_parameters_redux_325087.html
                             // Implementation: https://github.com/dlang/dmd/pull/9817
 
-    CppStdRevision cplusplus = CppStdRevision.cpp98;    // version of C++ standard to support
+    CppStdRevision cplusplus = CppStdRevision.cpp11;    // version of C++ standard to support
 
-    bool markdown;          // enable Markdown replacements in Ddoc
+    bool markdown = true;   // enable Markdown replacements in Ddoc
     bool vmarkdown;         // list instances of Markdown replacements in Ddoc
 
     bool showGaggedErrors;  // print gagged errors anyway
@@ -218,6 +244,7 @@ extern (C++) struct Param
     bool revertUsage;       // print help on -revert switch
     bool previewUsage;      // print help on -preview switch
     bool externStdUsage;    // print help on -extern-std switch
+    bool hcUsage;           // print help on -HC switch
     bool logo;              // print compiler logo
 
     CPU cpu = CPU.baseline; // CPU instruction set to target
@@ -252,7 +279,7 @@ extern (C++) struct Param
     const(char)[] hdrname;               // write 'header' file to docname
     bool hdrStripPlainFunctions = true; // strip the bodies of plain (non-template) functions
 
-    bool doCxxHdrGeneration;            // write 'Cxx header' file
+    CxxHeaderMode doCxxHdrGeneration;      /// Generate 'Cxx header' file
     const(char)[] cxxhdrdir;            // write 'header' file to docdir directory
     const(char)[] cxxhdrname;           // write 'header' file to docname
 
@@ -276,6 +303,11 @@ extern (C++) struct Param
 
     const(char)[] moduleDepsFile;        // filename for deps output
     OutBuffer* moduleDeps;              // contents to be written to deps file
+
+    bool emitMakeDeps;                   // whether to emit makedeps
+    const(char)[] makeDepsFile;          // filename for makedeps output
+    Array!(const(char)*) makeDeps;      // dependencies for makedeps
+
     MessageStyle messageStyle = MessageStyle.digitalmars; // style of file/line annotations on messages
 
     // Hidden debug switches
@@ -336,6 +368,8 @@ version (IN_LLVM)
     uint hashThreshold; // MD5 hash symbols larger than this threshold (0 = no hashing)
 
     bool outputSourceLocations; // if true, output line tables.
+
+    bool linkonceTemplates; // -linkonce-templates
 } // IN_LLVM
 }
 
@@ -344,6 +378,11 @@ alias structalign_t = uint;
 // magic value means "match whatever the underlying C compiler does"
 // other values are all powers of 2
 enum STRUCTALIGN_DEFAULT = (cast(structalign_t)~0);
+
+version (IN_LLVM)
+{
+    extern (C++, ldc) extern const char* dmd_version;
+}
 
 extern (C++) struct Global
 {
@@ -377,7 +416,12 @@ version (IN_LLVM)
     Array!(const(char)*)* path;         // Array of char*'s which form the import lookup path
     Array!(const(char)*)* filePath;     // Array of char*'s which form the file import lookup path
 
-    string _version;
+version (IN_LLVM) {} else
+{
+    private enum string _version = import("VERSION");
+    private enum uint _versionNumber = parseVersionNumber(_version);
+}
+
     const(char)[] vendor;    // Compiler backend name
 
     Param params;
@@ -439,9 +483,12 @@ else
 
     extern (C++) void _init()
     {
+<<<<<<< HEAD
 
         static if (!IN_LLVM) _version = import("VERSION") ~ '\0';
 
+=======
+>>>>>>> v1.25.1
         version (MARS)
 
         {
@@ -542,41 +589,81 @@ else
     }
 
     /**
+     * Computes the version number __VERSION__ from the compiler version string.
+     */
+    extern (D) private static uint parseVersionNumber(string version_)
+    {
+        //
+        // parse _version
+        //
+        uint major = 0;
+        uint minor = 0;
+        bool point = false;
+        // skip initial 'v'
+        foreach (const c; version_[1..$])
+        {
+            if ('0' <= c && c <= '9') // isdigit
+            {
+                minor = minor * 10 + c - '0';
+            }
+            else if (c == '.')
+            {
+                if (point)
+                    break; // ignore everything after second '.'
+                point = true;
+                major = minor;
+                minor = 0;
+            }
+            else
+                break;
+        }
+        return major * 1000 + minor;
+    }
+
+    /**
     Returns: the version as the number that would be returned for __VERSION__
     */
     extern(C++) uint versionNumber()
     {
-        import core.stdc.ctype;
-        __gshared uint cached = 0;
-        if (cached == 0)
-        {
-            //
-            // parse _version
-            //
-            uint major = 0;
-            uint minor = 0;
-            bool point = false;
-            for (const(char)* p = _version.ptr + 1;; p++)
-            {
-                const c = *p;
-                if (isdigit(cast(char)c))
-                {
-                    minor = minor * 10 + c - '0';
-                }
-                else if (c == '.')
-                {
-                    if (point)
-                        break; // ignore everything after second '.'
-                    point = true;
-                    major = minor;
-                    minor = 0;
-                }
-                else
-                    break;
-            }
-            cached = major * 1000 + minor;
-        }
-        return cached;
+version (IN_LLVM)
+{
+        return parseVersionNumber(versionString());
+}
+else
+{
+        return _versionNumber;
+}
+    }
+
+    /**
+    Returns: compiler version string.
+    */
+    extern(D) string versionString()
+    {
+version (IN_LLVM)
+{
+        import dmd.root.string : toDString;
+        return toDString(cast(immutable char*) dmd_version);
+}
+else
+{
+        return _version;
+}
+    }
+
+    /**
+    Returns: compiler version as char string.
+    */
+    extern(C++) const(char*) versionChars()
+    {
+version (IN_LLVM)
+{
+        return dmd_version;
+}
+else
+{
+        return _version.ptr;
+}
     }
 
     /**
@@ -610,12 +697,19 @@ alias d_uns32 = uint32_t;
 alias d_int64 = int64_t;
 alias d_uns64 = uint64_t;
 
+version (DMDLIB)
+{
+    version = LocOffset;
+}
+
 // file location
 struct Loc
 {
     const(char)* filename; // either absolute or relative to cwd
     uint linnum;
     uint charnum;
+    version (LocOffset)
+        uint fileOffset;
 
     static immutable Loc initial;       /// use for default initialization of const ref Loc's
 
@@ -713,19 +807,18 @@ nothrow:
     }
 }
 
-enum LINK : int
+enum LINK : ubyte
 {
     default_,
     d,
     c,
     cpp,
     windows,
-    pascal,
     objc,
     system,
 }
 
-enum CPPMANGLE : int
+enum CPPMANGLE : ubyte
 {
     def,
     asStruct,
@@ -740,7 +833,7 @@ enum MATCH : int
     exact,     // exact match
 }
 
-enum PINLINE : int
+enum PINLINE : ubyte
 {
     default_,     // as specified on the command line
     never,   // never inline

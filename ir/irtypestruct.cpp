@@ -30,26 +30,46 @@ IrTypeStruct::IrTypeStruct(StructDeclaration *sd)
 
 //////////////////////////////////////////////////////////////////////////////
 
-IrTypeStruct *IrTypeStruct::get(StructDeclaration *sd) {
-  auto t = new IrTypeStruct(sd);
-  sd->type->ctype = t;
+std::vector<IrTypeStruct *> IrTypeStruct::dcomputeTypes;
 
+/// Resets special DCompute structs so they get re-created
+/// with the proper address space when generating device code.
+void IrTypeStruct::resetDComputeTypes() {
+  for (auto irTypeStruct : dcomputeTypes) {
+    auto &ctype = getIrType(irTypeStruct->dtype);
+    delete ctype;
+    ctype = nullptr;
+  }
+
+  dcomputeTypes.clear();
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+IrTypeStruct *IrTypeStruct::get(StructDeclaration *sd) {
   IF_LOG Logger::println("Building struct type %s @ %s", sd->toPrettyChars(),
                          sd->loc.toChars());
   LOG_SCOPE;
 
+  auto t = new IrTypeStruct(sd);
+  getIrType(sd->type) = t;
+
   // if it's a forward declaration, all bets are off, stick with the opaque
-  if (sd->sizeok != SIZEOKdone) {
+  if (sd->sizeok != Sizeok::done) {
     return t;
   }
 
   t->packed = isPacked(sd);
 
+  if(isFromLDC_DCompute(sd)) {
+    dcomputeTypes.push_back(t);
+  }
+
   // For ldc.dcomptetypes.Pointer!(uint n,T),
   // emit { T addrspace(gIR->dcomputetarget->mapping[n])* }
-    llvm::Optional<DcomputePointer> p;
+  llvm::Optional<DcomputePointer> p;
+
   if (gIR->dcomputetarget && (p = toDcomputePointer(sd))) {
-   
     // Translate the virtual dcompute address space into the real one for
     // the target
     int realAS = gIR->dcomputetarget->mapping[p->addrspace];

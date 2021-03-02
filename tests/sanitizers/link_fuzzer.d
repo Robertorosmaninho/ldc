@@ -1,11 +1,11 @@
 // Test linking C++ stdlib (or not) with -fsanitize=fuzzer
 
-// REQUIRES: atleast_llvm500
 // REQUIRES: Fuzzer
+// UNSUPPORTED: Windows
 
 // RUN: %ldc -v -fsanitize=fuzzer %s | FileCheck %s
-// "libFuzzer.a" before LLVM 6.0, "lib(ldc|clang)_rt.fuzzer.*.a" since LLVM 6.0
-// CHECK: {{(libFuzzer\.a|_rt\.fuzzer.*\.a)}}
+// "lib(ldc|clang)_rt.fuzzer.*.a" since LLVM 6.0
+// CHECK: {{_rt\.fuzzer.*\.a}}
 // CHECK-SAME: -l{{(std)?}}c++
 
 // RUN: %ldc -v -fsanitize=fuzzer -link-no-cpp %s > %t_nocpp.log || true

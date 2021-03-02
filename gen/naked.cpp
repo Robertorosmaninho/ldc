@@ -158,12 +158,11 @@ void DtoDefineNakedFunction(FuncDeclaration *fd) {
 
   const auto &triple = *global.params.targetTriple;
   bool const isWin = triple.isOSWindows();
-  bool const isOSX = (triple.getOS() == llvm::Triple::Darwin ||
-                      triple.getOS() == llvm::Triple::MacOSX);
+  bool const isDarwin = triple.isOSDarwin();
 
   // osx is different
   // also mangling has an extra underscore prefixed
-  if (isOSX) {
+  if (isDarwin) {
     fullmangle += '_';
     fullmangle += mangle;
     mangle = fullmangle.c_str();
@@ -171,7 +170,7 @@ void DtoDefineNakedFunction(FuncDeclaration *fd) {
     asmstr << "\t.section\t__TEXT,__text,regular,pure_instructions"
            << std::endl;
     asmstr << "\t.globl\t" << mangle << std::endl;
-    if (DtoIsTemplateInstance(fd)) {
+    if (fd->isInstantiated()) {
       asmstr << "\t.weak_definition\t" << mangle << std::endl;
     }
     asmstr << "\t.p2align\t4, 0x90" << std::endl;
@@ -199,7 +198,7 @@ void DtoDefineNakedFunction(FuncDeclaration *fd) {
     asmstr << "\t.type\t32;" << std::endl;
     asmstr << "\t.endef" << std::endl;
 
-    if (DtoIsTemplateInstance(fd)) {
+    if (fd->isInstantiated()) {
       asmstr << "\t.section\t.text,\"xr\",discard," << mangle << std::endl;
     } else {
       asmstr << "\t.text" << std::endl;
@@ -208,7 +207,7 @@ void DtoDefineNakedFunction(FuncDeclaration *fd) {
     asmstr << "\t.p2align\t4, 0x90" << std::endl;
     asmstr << mangle << ":" << std::endl;
   } else {
-    if (DtoIsTemplateInstance(fd)) {
+    if (fd->isInstantiated()) {
       asmstr << "\t.section\t.text." << mangle << ",\"axG\",@progbits,"
              << mangle << ",comdat" << std::endl;
       asmstr << "\t.weak\t" << mangle << std::endl;
@@ -233,7 +232,7 @@ void DtoDefineNakedFunction(FuncDeclaration *fd) {
 
   // emit size after body
   // llvm does this on linux, but not on osx or Win
-  if (!(isWin || isOSX)) {
+  if (!(isWin || isDarwin)) {
     asmstr << "\t.size\t" << mangle << ", .-" << mangle << std::endl
            << std::endl;
   }
@@ -254,7 +253,7 @@ void DtoDefineNakedFunction(FuncDeclaration *fd) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void emitABIReturnAsmStmt(IRAsmBlock *asmblock, Loc &loc,
+void emitABIReturnAsmStmt(IRAsmBlock *asmblock, const Loc &loc,
                           FuncDeclaration *fdecl) {
   IF_LOG Logger::println("emitABIReturnAsmStmt(%s)", mangleExact(fdecl));
   LOG_SCOPE;
@@ -282,7 +281,7 @@ void emitABIReturnAsmStmt(IRAsmBlock *asmblock, Loc &loc,
       }
     } else if (rt->isfloating()) {
       if (rt->iscomplex()) {
-        if (fdecl->linkage == LINKd) {
+        if (fdecl->linkage == LINK::d) {
           // extern(D) always returns on the FPU stack
           as->out_c = "={st},={st(1)},";
           asmblock->retn = 2;
@@ -404,8 +403,8 @@ void emitABIReturnAsmStmt(IRAsmBlock *asmblock, Loc &loc,
 
 // sort of kinda related to naked ...
 
-DValue *DtoInlineAsmExpr(Loc &loc, FuncDeclaration *fd, Expressions *arguments,
-                         LLValue *sretPointer) {
+DValue *DtoInlineAsmExpr(const Loc &loc, FuncDeclaration *fd,
+                         Expressions *arguments, LLValue *sretPointer) {
   assert(fd->toParent()->isTemplateInstance() && "invalid inline __asm expr");
   assert(arguments->length >= 2 && "invalid __asm call");
 

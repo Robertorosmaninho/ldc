@@ -84,6 +84,7 @@ public:
     unsigned numlines;  // number of lines in source file
     bool isHdrFile;     // if it is a header (.di) file
     bool isDocFile;     // if it is a documentation input file, not D source
+    bool hasAlwaysInlines; // contains references to functions that must be inlined
     bool isPackageFile; // if it is a package.d
     Package *pkg;       // if isPackageFile is true, the Package that contains this package.d
     Strings contentImportedFiles;  // array of files whose content was imported
@@ -109,12 +110,12 @@ public:
     Modules aimports;             // all imported modules
 
     unsigned debuglevel;        // debug level
-    Strings *debugids;      // debug identifiers
-    Strings *debugidsNot;       // forward referenced debug identifiers
+    Identifiers *debugids;      // debug identifiers
+    Identifiers *debugidsNot;   // forward referenced debug identifiers
 
     unsigned versionlevel;      // version level
-    Strings *versionids;    // version identifiers
-    Strings *versionidsNot;     // forward referenced version identifiers
+    Identifiers *versionids;    // version identifiers
+    Identifiers *versionidsNot; // forward referenced version identifiers
 
     MacroTable macrotable;      // document comment macros
     Escape *escapetable;        // document comment escapes
@@ -147,6 +148,21 @@ public:
 
     // Back end
 
+#if IN_LLVM
+    llvm::Module *genLLVMModule(llvm::LLVMContext &context);
+    void checkAndAddOutputFile(const FileName &file);
+
+    bool llvmForceLogging;
+    bool noModuleInfo; /// Do not emit any module metadata.
+
+    // Coverage analysis
+    llvm::GlobalVariable
+        *d_cover_valid; // private immutable size_t[] _d_cover_valid;
+    llvm::GlobalVariable *d_cover_data; // private uint[] _d_cover_data;
+    Array<size_t> d_cover_valid_init;   // initializer for _d_cover_valid
+
+    void initCoverageDataWithCtfeCoverage(unsigned *data) const;
+#else
     int doppelganger;           // sub-module
     Symbol *cov;                // private uint[] __coverage;
     unsigned *covb;             // bit array of valid code line numbers
@@ -159,21 +175,9 @@ public:
     Symbol *stest;              // module unit test
 
     Symbol *sfilename;          // symbol for filename
-
-#if IN_LLVM
-    // LDC
-    llvm::Module* genLLVMModule(llvm::LLVMContext& context);
-    void checkAndAddOutputFile(const FileName &file);
-    void makeObjectFilenameUnique();
-
-    bool llvmForceLogging;
-    bool noModuleInfo; /// Do not emit any module metadata.
-
-    // Coverage analysis
-    llvm::GlobalVariable* d_cover_valid;  // private immutable size_t[] _d_cover_valid;
-    llvm::GlobalVariable* d_cover_data;   // private uint[] _d_cover_data;
-    Array<size_t>         d_cover_valid_init; // initializer for _d_cover_valid
 #endif
+
+    void *ctfe_cov;             // stores coverage information from ctfe
 
     Module *isModule() { return this; }
     void accept(Visitor *v) { v->visit(this); }

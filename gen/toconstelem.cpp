@@ -82,7 +82,7 @@ public:
     }
 
     if (TypeInfoDeclaration *ti = e->var->isTypeInfoDeclaration()) {
-      result = DtoTypeInfoOf(ti->tinfo, false);
+      result = DtoTypeInfoOf(e->loc, ti->tinfo, /*base=*/false);
       result = DtoBitCast(result, DtoType(e->type));
       return;
     }
@@ -169,29 +169,13 @@ public:
     LOG_SCOPE;
 
     Type *const t = e->type->toBasetype();
-    Type *const cty = t->nextOf()->toBasetype();
-
-    auto _init = buildStringLiteralConstant(e, t->ty != Tsarray);
 
     if (t->ty == Tsarray) {
-      result = _init;
+      result = buildStringLiteralConstant(e, false);
       return;
     }
 
-    auto stringLiteralCache = stringLiteralCacheForType(cty);
-    llvm::StringRef key(e->toChars());
-    llvm::GlobalVariable *gvar =
-        (stringLiteralCache->find(key) == stringLiteralCache->end())
-            ? nullptr
-            : (*stringLiteralCache)[key];
-    if (gvar == nullptr) {
-      llvm::GlobalValue::LinkageTypes _linkage =
-          llvm::GlobalValue::PrivateLinkage;
-      gvar = new llvm::GlobalVariable(gIR->module, _init->getType(), true,
-                                      _linkage, _init, ".str");
-      gvar->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
-      (*stringLiteralCache)[key] = gvar;
-    }
+    llvm::GlobalVariable *gvar = p->getCachedStringLiteral(e);
 
     llvm::ConstantInt *zero =
         LLConstantInt::get(LLType::getInt32Ty(gIR->context()), 0, false);
@@ -305,7 +289,7 @@ public:
               static_cast<TypeClass *>(tb)->sym->isInterfaceDeclaration()) {
         assert(it->isBaseOf(cd, NULL));
 
-        IrTypeClass *typeclass = cd->type->ctype->isClass();
+        IrTypeClass *typeclass = getIrType(cd->type)->isClass();
 
         // find interface impl
         size_t i_index = typeclass->getInterfaceIndex(it);
@@ -423,7 +407,7 @@ public:
 
       p->setStructLiteralConstant(se, globalVar);
       llvm::Constant *constValue = toConstElem(se);
-      constValue = p->setGlobalVarInitializer(globalVar, constValue);
+      constValue = p->setGlobalVarInitializer(globalVar, constValue, nullptr);
       p->setStructLiteralConstant(se, constValue);
 
       result = constValue;
@@ -476,7 +460,7 @@ public:
     // added to the module member list.
     Declaration_codegen(fd, p);
 
-    result = DtoCallee(fd);
+    result = DtoCallee(fd, false);
     assert(result);
 
     if (fd->tok != TOKfunction) {
@@ -581,7 +565,7 @@ public:
       IF_LOG Logger::cout() << "Using existing global: " << *result << '\n';
     } else {
       auto globalVar = new llvm::GlobalVariable(
-          p->module, origClass->type->ctype->isClass()->getMemoryLLType(),
+          p->module, getIrType(origClass->type)->isClass()->getMemoryLLType(),
           false, llvm::GlobalValue::InternalLinkage, nullptr, ".classref");
       p->setStructLiteralConstant(value, globalVar);
 
@@ -620,7 +604,7 @@ public:
 
       llvm::Constant *constValue =
           getIrAggr(origClass)->createInitializerConstant(varInits);
-      constValue = p->setGlobalVarInitializer(globalVar, constValue);
+      constValue = p->setGlobalVarInitializer(globalVar, constValue, nullptr);
       p->setStructLiteralConstant(value, constValue);
 
       result = constValue;
@@ -631,10 +615,9 @@ public:
       if (InterfaceDeclaration *it = targetClass->isInterfaceDeclaration()) {
         assert(it->isBaseOf(origClass, NULL));
 
-        IrTypeClass *typeclass = origClass->type->ctype->isClass();
-
         // find interface impl
-        size_t i_index = typeclass->getInterfaceIndex(it);
+        size_t i_index =
+            getIrType(origClass->type)->isClass()->getInterfaceIndex(it);
         assert(i_index != ~0UL);
 
         // offset pointer
@@ -680,8 +663,15 @@ public:
       // cast.
       // FIXME: Check DMD source to understand why two different ASTs are
       //        constructed.
+#if LDC_LLVM_VER >= 1200
+      const auto elementCount = llvm::ElementCount::getFixed(elemCount);
+#elif LDC_LLVM_VER >= 1100
+      const auto elementCount = llvm::ElementCount(elemCount, false);
+#else
+      const auto elementCount = elemCount;
+#endif
       result = llvm::ConstantVector::getSplat(
-          elemCount, toConstElem(e->e1->optimize(WANTvalue)));
+          elementCount, toConstElem(e->e1->optimize(WANTvalue)));
     }
   }
 
@@ -697,7 +687,7 @@ public:
       return;
     }
 
-    result = DtoTypeInfoOf(t, /*base=*/false);
+    result = DtoTypeInfoOf(e->loc, t, /*base=*/false);
     result = DtoBitCast(result, DtoType(e->type));
   }
 

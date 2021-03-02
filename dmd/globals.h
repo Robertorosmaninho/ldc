@@ -30,6 +30,26 @@ enum OUTPUTFLAG
 };
 #endif
 
+typedef unsigned char TargetOS;
+enum
+{
+    /* These are mutually exclusive; one and only one is set.
+     * Match spelling and casing of corresponding version identifiers
+     */
+    TargetOS_linux        = 1,
+    TargetOS_Windows      = 2,
+    TargetOS_OSX          = 4,
+    TargetOS_OpenBSD      = 8,
+    TargetOS_FreeBSD      = 0x10,
+    TargetOS_Solaris      = 0x20,
+    TargetOS_DragonFlyBSD = 0x40,
+
+    // Combination masks
+    all = TargetOS_linux | TargetOS_Windows | TargetOS_OSX | TargetOS_FreeBSD | TargetOS_Solaris | TargetOS_DragonFlyBSD,
+    Posix = TargetOS_linux | TargetOS_OSX | TargetOS_FreeBSD | TargetOS_Solaris | TargetOS_DragonFlyBSD,
+};
+
+
 typedef unsigned char Diagnostic;
 enum
 {
@@ -64,7 +84,7 @@ enum
     CHECKACTION_context   // call D assert with the error context on failure
 };
 
-enum CPU
+enum class CPU
 {
     x87,
     mmx,
@@ -97,7 +117,16 @@ enum CppStdRevision
     CppStdRevisionCpp98 = 199711,
     CppStdRevisionCpp11 = 201103,
     CppStdRevisionCpp14 = 201402,
-    CppStdRevisionCpp17 = 201703
+    CppStdRevisionCpp17 = 201703,
+    CppStdRevisionCpp20 = 202002
+};
+
+/// Configuration for the C++ header generator
+enum class CxxHeaderMode
+{
+    none,   /// Don't generate headers
+    silent, /// Generate headers
+    verbose /// Generate headers and add comments for hidden declarations
 };
 
 // Put command line switches in here
@@ -115,6 +144,8 @@ struct Param
     bool vcg_ast;       // write-out codegen-ast
     bool showColumns;   // print character (column) numbers in diagnostics
     bool vtls;          // identify thread local variables
+    bool vtemplates;    // collect and list statistics on template instantiations
+    bool vtemplatesListInstances; // collect and list statistics on template instantiations origins
     bool vgc;           // identify gc usage
     bool vfield;        // identify non-mutable field variables
     bool vcomplex;      // identify complex/imaginary type usage
@@ -125,13 +156,7 @@ struct Param
     bool map;           // generate linker .map file
     bool is64bit;       // generate 64 bit code
     bool isLP64;        // generate code for LP64
-    bool isLinux;       // generate code for linux
-    bool isOSX;         // generate code for Mac OSX
-    bool isWindows;     // generate code for Windows
-    bool isFreeBSD;     // generate code for FreeBSD
-    bool isOpenBSD;     // generate code for OpenBSD
-    bool isDragonFlyBSD;// generate code for DragonFlyBSD
-    bool isSolaris;     // generate code for Solaris
+    TargetOS targetOS;      // operating system to generate code for
     bool hasObjectiveC; // target supports Objective-C
     bool mscoff;        // for Win32: write COFF object files instead of OMF
     Diagnostic useDeprecated;
@@ -148,19 +173,21 @@ struct Param
     bool color;         // use ANSI colors in console output
     bool cov;           // generate code coverage data
     unsigned char covPercent;   // 0..100 code coverage percentage required
+    bool ctfe_cov;      // generate coverage data for ctfe
     bool nofloat;       // code should not pull in floating point support
     bool ignoreUnsupportedPragmas;      // rather than error on them
     bool useModuleInfo; // generate runtime module information
     bool useTypeInfo;   // generate runtime type information
     bool useExceptions; // support exception handling
     bool noSharedAccess; // read/write access to shared memory objects
-    bool inMeansScopeConst; // `in` means `scope const`
+    bool previewIn;     // `in` means `scope const`, perhaps `ref`, accepts rvalues
     bool betterC;       // be a "better C" compiler; no dependency on D runtime
     bool addMain;       // add a default main() function
     bool allInst;       // generate code for all template instantiations
     bool fix16997;      // fix integral promotions for unary + - ~ operators
                         // https://issues.dlang.org/show_bug.cgi?id=16997
     bool fixAliasThis;  // if the current scope has an alias this, check it before searching upper scopes
+    bool inclusiveInContracts;   // 'in' contracts of overridden methods must be a superset of parent contract
     bool vsafe;         // use enhanced @safe checking
     bool ehnogc;        // use @nogc exception handling
     bool dtorFields;        // destruct fields of partially constructed objects
@@ -181,6 +208,7 @@ struct Param
     bool revertUsage;       // print help on -revert switch
     bool previewUsage;      // print help on -preview switch
     bool externStdUsage;    // print help on -extern-std switch
+    bool hcUsage;           // print help on -HC switch
     bool logo;              // print logo;
 
     CPU cpu;                // CPU instruction set to target
@@ -215,7 +243,7 @@ struct Param
     DString hdrname;       // write 'header' file to docname
     bool hdrStripPlainFunctions; // strip the bodies of plain (non-template) functions
 
-    bool doCxxHdrGeneration;  // write 'Cxx header' file
+    CxxHeaderMode doCxxHdrGeneration;  // write 'Cxx header' file
     DString cxxhdrdir;        // write 'header' file to docdir directory
     DString cxxhdrname;       // write 'header' file to docname
 
@@ -239,6 +267,11 @@ struct Param
 
     DString moduleDepsFile;     // filename for deps output
     OutBuffer *moduleDeps;      // contents to be written to deps file
+
+    bool emitMakeDeps;                // whether to emit makedeps
+    DString makeDepsFile;             // filename for makedeps output
+    Array<const char *> makeDeps;     // dependencies for makedeps
+
     MessageStyle messageStyle;  // style of file/line annotations on messages
 
     // Hidden debug switches
@@ -297,6 +330,8 @@ struct Param
     unsigned hashThreshold; // MD5 hash symbols larger than this threshold (0 = no hashing)
 
     bool outputSourceLocations; // if true, output line tables.
+
+    bool linkonceTemplates; // -linkonce-templates
 #endif
 };
 
@@ -338,7 +373,6 @@ struct Global
     Array<const char *> *path;        // Array of char*'s which form the import lookup path
     Array<const char *> *filePath;    // Array of char*'s which form the file import lookup path
 
-    DString version;         // Compiler version string
     DString vendor;          // Compiler backend name
 
     Param params;
@@ -378,6 +412,11 @@ struct Global
     Returns: the version as the number that would be returned for __VERSION__
     */
     unsigned versionNumber();
+
+    /**
+    Returns: the compiler version string.
+    */
+    const char * versionChars();
 };
 
 extern Global global;
@@ -437,23 +476,22 @@ struct Loc
     bool equals(const Loc& loc) const;
 };
 
-enum LINK
+enum class LINK : uint8_t
 {
-    LINKdefault,
-    LINKd,
-    LINKc,
-    LINKcpp,
-    LINKwindows,
-    LINKpascal,
-    LINKobjc,
-    LINKsystem
+    default_,
+    d,
+    c,
+    cpp,
+    windows,
+    objc,
+    system
 };
 
-enum CPPMANGLE
+enum class CPPMANGLE : uint8_t
 {
-    CPPMANGLEdefault,
-    CPPMANGLEstruct,
-    CPPMANGLEclass
+    def,
+    asStruct,
+    asClass
 };
 
 enum MATCH
@@ -464,11 +502,11 @@ enum MATCH
     MATCHexact          // exact match
 };
 
-enum PINLINE
+enum class PINLINE : uint8_t
 {
-    PINLINEdefault,      // as specified on the command line
-    PINLINEnever,        // never inline
-    PINLINEalways        // always inline
+    default_,     // as specified on the command line
+    never,        // never inline
+    always        // always inline
 };
 
 typedef uinteger_t StorageClass;

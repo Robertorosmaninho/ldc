@@ -71,7 +71,6 @@ LLType *DtoType(Type *t) {
   IF_LOG Logger::println("Building type: %s", t->toChars());
   LOG_SCOPE;
 
-  assert(t);
   switch (t->ty) {
   // basic types
   case Tvoid:
@@ -118,29 +117,42 @@ LLType *DtoType(Type *t) {
   }
 
   // aggregates
-  case Tstruct: {
-    TypeStruct *ts = static_cast<TypeStruct *>(t);
-    if (ts->sym->type->ctype) {
-      // This should not happen, but the frontend seems to be buggy. Not
-      // sure if this is the best way to handle the situation, but we
-      // certainly don't want to override ts->sym->type->ctype.
-      IF_LOG Logger::cout()
-          << "Struct with multiple Types detected: " << ts->toChars() << " ("
-          << ts->sym->locToChars() << ")" << std::endl;
-      return ts->sym->type->ctype->getLLType();
-    }
-    return IrTypeStruct::get(ts->sym)->getLLType();
-  }
+  case Tstruct:
   case Tclass: {
-    TypeClass *tc = static_cast<TypeClass *>(t);
-    if (tc->sym->type->ctype) {
-      // See Tstruct case.
-      IF_LOG Logger::cout()
-          << "Class with multiple Types detected: " << tc->toChars() << " ("
-          << tc->sym->locToChars() << ")" << std::endl;
-      return tc->sym->type->ctype->getLLType();
+    const auto isStruct = t->ty == Tstruct;
+    AggregateDeclaration *ad;
+    if (isStruct) {
+      ad = static_cast<TypeStruct *>(t)->sym;
+    } else {
+      ad = static_cast<TypeClass *>(t)->sym;
     }
-    return IrTypeClass::get(tc->sym)->getLLType();
+    if (ad->type->ty == Terror) {
+      static LLStructType *opaqueErrorType =
+          LLStructType::create(gIR->context(), Type::terror->toChars());
+      return opaqueErrorType;
+    }
+    Type *adType = stripModifiers(ad->type);
+    if (adType->ctype) {
+      /* This should not happen, but e.g. can for aggregates whose mangled name
+       * contains a lambda which got promoted from a delegate to a function.
+       * We certainly don't want to override adType->ctype, and not associate
+       * an IrType to multiple Types either (see e.g.
+       * IrTypeStruct::resetDComputeTypes()).
+       * This means there are some aggregate Types which don't have an
+       * associated ctype, so getIrType() should always be fed with its
+       * AggregateDeclaration::type.
+       */
+      IF_LOG {
+        Logger::println("Aggregate with multiple Types detected: %s (%s)",
+                        ad->toPrettyChars(), ad->locToChars());
+        LOG_SCOPE;
+        Logger::println("Existing deco:    %s", adType->deco);
+        Logger::println("Mismatching deco: %s", t->deco);
+      }
+      return adType->ctype->getLLType();
+    }
+    return isStruct ? IrTypeStruct::get(ad->isStructDeclaration())->getLLType()
+                    : IrTypeClass::get(ad->isClassDeclaration())->getLLType();
   }
 
   // functions
@@ -173,9 +185,8 @@ LLType *DtoType(Type *t) {
   case Taarray:
     return getVoidPtrType();
 
-  case Tvector: {
+  case Tvector:
     return IrTypeVector::get(t)->getLLType();
-  }
 
   default:
     llvm_unreachable("Unknown class of D Type!");
@@ -215,15 +226,24 @@ LLValue *DtoDelegateEquals(TOK op, LLValue *lhs, LLValue *rhs) {
 ////////////////////////////////////////////////////////////////////////////////
 
 LinkageWithCOMDAT DtoLinkage(Dsymbol *sym) {
-  // Function (incl. delegate) literals are emitted into each referencing
-  // compilation unit; use template linkage to prevent conflicts.
-  auto linkage = (sym->isFuncLiteralDeclaration() || DtoIsTemplateInstance(sym))
-                     ? templateLinkage
-                     : LLGlobalValue::ExternalLinkage;
-
-  // If @(ldc.attributes.weak) is applied, override the linkage to WeakAny
+  LLGlobalValue::LinkageTypes linkage = LLGlobalValue::ExternalLinkage;
   if (hasWeakUDA(sym)) {
     linkage = LLGlobalValue::WeakAnyLinkage;
+  } else {
+    // Function (incl. delegate) literals are emitted into each referencing
+    // compilation unit, so use linkonce_odr for all lambdas and all global
+    // variables they define.
+    auto potentialLambda = sym;
+    if (auto vd = sym->isVarDeclaration()) {
+      if (vd->isDataseg())
+        potentialLambda = vd->toParent2();
+    }
+
+    if (potentialLambda->isFuncLiteralDeclaration()) {
+      linkage = LLGlobalValue::LinkOnceODRLinkage;
+    } else if (sym->isInstantiated()) {
+      linkage = templateLinkage;
+    }
   }
 
   return {linkage, needsCOMDAT()};
@@ -316,7 +336,6 @@ LLValue *DtoGEP(LLValue *ptr, unsigned i0, unsigned i1, const char *name,
 
 LLConstant *DtoGEP(LLConstant *ptr, unsigned i0, unsigned i1) {
   LLPointerType *p = isaPointer(ptr);
-  (void)p;
   assert(p && "GEP expects a pointer type");
   LLValue *indices[] = {DtoConstUint(i0), DtoConstUint(i1)};
   return llvm::ConstantExpr::getGetElementPtr(p->getElementType(), ptr, indices,
@@ -429,19 +448,7 @@ LLConstant *DtoConstFP(Type *t, const real_t value) {
 LLConstant *DtoConstCString(const char *str) {
   llvm::StringRef s(str ? str : "");
 
-  const auto it = gIR->stringLiteral1ByteCache.find(s);
-  llvm::GlobalVariable *gvar =
-      it == gIR->stringLiteral1ByteCache.end() ? nullptr : it->getValue();
-
-  if (gvar == nullptr) {
-    llvm::Constant *init =
-        llvm::ConstantDataArray::getString(gIR->context(), s, true);
-    gvar = new llvm::GlobalVariable(gIR->module, init->getType(), true,
-                                    llvm::GlobalValue::PrivateLinkage, init,
-                                    ".str");
-    gvar->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
-    gIR->stringLiteral1ByteCache[s] = gvar;
-  }
+  LLGlobalVariable *gvar = gIR->getCachedStringLiteral(s);
 
   LLConstant *idxs[] = {DtoConstUint(0), DtoConstUint(0)};
   return llvm::ConstantExpr::getGetElementPtr(gvar->getInitializer()->getType(),
@@ -464,7 +471,9 @@ LLValue *DtoLoad(LLValue *src, const char *name) {
 // the type.
 LLValue *DtoAlignedLoad(LLValue *src, const char *name) {
   llvm::LoadInst *ld = gIR->ir->CreateLoad(src, name);
-  ld->setAlignment(LLMaybeAlign(getABITypeAlign(ld->getType())));
+  if (auto alignment = getABITypeAlign(ld->getType())) {
+    ld->setAlignment(LLAlign(alignment));
+  }
   return ld;
 }
 
@@ -501,7 +510,9 @@ void DtoAlignedStore(LLValue *src, LLValue *dst) {
   assert(src->getType() != llvm::Type::getInt1Ty(gIR->context()) &&
          "Should store bools as i8 instead of i1.");
   llvm::StoreInst *st = gIR->ir->CreateStore(src, dst);
-  st->setAlignment(LLMaybeAlign(getABITypeAlign(src->getType())));
+  if (auto alignment = getABITypeAlign(src->getType())) {
+    st->setAlignment(LLAlign(alignment));
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

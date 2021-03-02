@@ -16,81 +16,65 @@ import core.stdc.stdio;
 import core.stdc.stdlib;
 import core.stdc.string;
 
-version = GC;
+import core.memory : GC;
 
-version (GC)
-{
-    import core.memory : GC;
-
-    enum isGCAvailable = true;
-
-    version (IN_LLVM)
-    extern extern(C) __gshared string[] rt_options;
-}
-else
-    enum isGCAvailable = false;
+version (IN_LLVM)
+extern extern(C) __gshared string[] rt_options;
 
 extern (C++) struct Mem
 {
     static char* xstrdup(const(char)* s) nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return s ? s[0 .. strlen(s) + 1].dup.ptr : null;
+        if (isGCEnabled)
+            return s ? s[0 .. strlen(s) + 1].dup.ptr : null;
 
         return s ? cast(char*)check(.strdup(s)) : null;
     }
 
     static void xfree(void* p) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return GC.free(p);
+        if (isGCEnabled)
+            return GC.free(p);
 
         pureFree(p);
     }
 
     static void* xmalloc(size_t size) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return size ? GC.malloc(size) : null;
+        if (isGCEnabled)
+            return size ? GC.malloc(size) : null;
 
         return size ? check(pureMalloc(size)) : null;
     }
 
     static void* xmalloc_noscan(size_t size) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return size ? GC.malloc(size, GC.BlkAttr.NO_SCAN) : null;
+        if (isGCEnabled)
+            return size ? GC.malloc(size, GC.BlkAttr.NO_SCAN) : null;
 
         return size ? check(pureMalloc(size)) : null;
     }
 
     static void* xcalloc(size_t size, size_t n) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return size * n ? GC.calloc(size * n) : null;
+        if (isGCEnabled)
+            return size * n ? GC.calloc(size * n) : null;
 
         return (size && n) ? check(pureCalloc(size, n)) : null;
     }
 
     static void* xcalloc_noscan(size_t size, size_t n) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return size * n ? GC.calloc(size * n, GC.BlkAttr.NO_SCAN) : null;
+        if (isGCEnabled)
+            return size * n ? GC.calloc(size * n, GC.BlkAttr.NO_SCAN) : null;
 
         return (size && n) ? check(pureCalloc(size, n)) : null;
     }
 
     static void* xrealloc(void* p, size_t size) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return GC.realloc(p, size);
+        if (isGCEnabled)
+            return GC.realloc(p, size);
 
         if (!size)
         {
@@ -103,9 +87,8 @@ extern (C++) struct Mem
 
     static void* xrealloc_noscan(void* p, size_t size) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return GC.realloc(p, size, GC.BlkAttr.NO_SCAN);
+        if (isGCEnabled)
+            return GC.realloc(p, size, GC.BlkAttr.NO_SCAN);
 
         if (!size)
         {
@@ -135,39 +118,36 @@ extern (C++) struct Mem
         return p ? p : error();
     }
 
-    version (GC)
+    __gshared bool _isGCEnabled = true;
+
+    // fake purity by making global variable immutable (_isGCEnabled only modified before startup)
+    enum _pIsGCEnabled = cast(immutable bool*) &_isGCEnabled;
+
+    static bool isGCEnabled() pure nothrow @nogc @safe
     {
-        __gshared bool _isGCEnabled = true;
+        return *_pIsGCEnabled;
+    }
 
-        // fake purity by making global variable immutable (_isGCEnabled only modified before startup)
-        enum _pIsGCEnabled = cast(immutable bool*) &_isGCEnabled;
-
-        static bool isGCEnabled() pure nothrow @nogc @safe
+    static void disableGC() nothrow @nogc
+    {
+        version (IN_LLVM)
         {
-            return *_pIsGCEnabled;
+            __gshared string[] disable_options = [ "gcopt=disable:1" ];
+            rt_options = disable_options;
         }
+        _isGCEnabled = false;
+    }
 
-        static void disableGC() nothrow @nogc
-        {
-            version (IN_LLVM)
-            {
-                __gshared string[] disable_options = [ "gcopt=disable:1" ];
-                rt_options = disable_options;
-            }
-            _isGCEnabled = false;
-        }
+    static void addRange(const(void)* p, size_t size) nothrow @nogc
+    {
+        if (isGCEnabled)
+            GC.addRange(p, size);
+    }
 
-        static void addRange(const(void)* p, size_t size) nothrow @nogc
-        {
-            if (isGCEnabled)
-                GC.addRange(p, size);
-        }
-
-        static void removeRange(const(void)* p) nothrow @nogc
-        {
-            if (isGCEnabled)
-                GC.removeRange(p);
-        }
+    static void removeRange(const(void)* p) nothrow @nogc
+    {
+        if (isGCEnabled)
+            GC.removeRange(p);
     }
 }
 
@@ -178,7 +158,7 @@ enum CHUNK_SIZE = (256 * 4096 - 64);
 __gshared size_t heapleft = 0;
 __gshared void* heapp;
 
-extern (C) void* allocmemory(size_t m_size) nothrow @nogc
+extern (D) void* allocmemoryNoFree(size_t m_size) nothrow @nogc
 {
     // 16 byte alignment is better (and sometimes needed) for doubles
     m_size = (m_size + 15) & ~15;
@@ -201,6 +181,14 @@ extern (C) void* allocmemory(size_t m_size) nothrow @nogc
     heapleft = CHUNK_SIZE;
     heapp = Mem.check(malloc(CHUNK_SIZE));
     goto L1;
+}
+
+extern (D) void* allocmemory(size_t m_size) nothrow
+{
+    if (mem.isGCEnabled)
+        return GC.malloc(m_size);
+
+    return allocmemoryNoFree(m_size);
 }
 
 version (DigitalMars)
@@ -228,48 +216,37 @@ else
 static if (OVERRIDE_MEMALLOC)
 {
     // Override the host druntime allocation functions in order to use the bump-
-    // pointer allocation scheme (`allocmemory()` above) if the GC is disabled.
+    // pointer allocation scheme (`allocmemoryNoFree()` above) if the GC is disabled.
     // That scheme is faster and comes with less memory overhead than using a
     // disabled GC alone.
 
     extern (C) void* _d_allocmemory(size_t m_size) nothrow
     {
-        version (GC)
-            if (mem.isGCEnabled)
-                return GC.malloc(m_size);
-
         return allocmemory(m_size);
     }
 
-    version (GC)
+    private void* allocClass(const ClassInfo ci) nothrow pure
     {
-        private void* allocClass(const ClassInfo ci) nothrow pure
-        {
-            alias BlkAttr = GC.BlkAttr;
+        alias BlkAttr = GC.BlkAttr;
 
-            assert(!(ci.m_flags & TypeInfo_Class.ClassFlags.isCOMclass));
+        assert(!(ci.m_flags & TypeInfo_Class.ClassFlags.isCOMclass));
 
-            BlkAttr attr = BlkAttr.NONE;
-            if (ci.m_flags & TypeInfo_Class.ClassFlags.hasDtor
-                && !(ci.m_flags & TypeInfo_Class.ClassFlags.isCPPclass))
-                attr |= BlkAttr.FINALIZE;
-            if (ci.m_flags & TypeInfo_Class.ClassFlags.noPointers)
-                attr |= BlkAttr.NO_SCAN;
-            return GC.malloc(ci.initializer.length, attr, ci);
-        }
-
-        extern (C) void* _d_newitemU(const TypeInfo ti) nothrow;
+        BlkAttr attr = BlkAttr.NONE;
+        if (ci.m_flags & TypeInfo_Class.ClassFlags.hasDtor
+            && !(ci.m_flags & TypeInfo_Class.ClassFlags.isCPPclass))
+            attr |= BlkAttr.FINALIZE;
+        if (ci.m_flags & TypeInfo_Class.ClassFlags.noPointers)
+            attr |= BlkAttr.NO_SCAN;
+        return GC.malloc(ci.initializer.length, attr, ci);
     }
+
+    extern (C) void* _d_newitemU(const TypeInfo ti) nothrow;
 
     extern (C) Object _d_newclass(const ClassInfo ci) nothrow
     {
         const initializer = ci.initializer;
 
-        version (GC)
-            auto p = mem.isGCEnabled ? allocClass(ci) : allocmemory(initializer.length);
-        else
-            auto p = allocmemory(initializer.length);
-
+        auto p = mem.isGCEnabled ? allocClass(ci) : allocmemoryNoFree(initializer.length);
         memcpy(p, initializer.ptr, initializer.length);
         return cast(Object) p;
     }
@@ -278,32 +255,23 @@ static if (OVERRIDE_MEMALLOC)
     {
         extern (C) Object _d_allocclass(const ClassInfo ci) nothrow
         {
-            version (GC)
-                if (mem.isGCEnabled)
-                    return cast(Object) allocClass(ci);
+            if (mem.isGCEnabled)
+                return cast(Object) allocClass(ci);
 
-            return cast(Object) allocmemory(ci.initializer.length);
+            return cast(Object) allocmemoryNoFree(ci.initializer.length);
         }
     }
 
     extern (C) void* _d_newitemT(TypeInfo ti) nothrow
     {
-        version (GC)
-            auto p = mem.isGCEnabled ? _d_newitemU(ti) : allocmemory(ti.tsize);
-        else
-            auto p = allocmemory(ti.tsize);
-
+        auto p = mem.isGCEnabled ? _d_newitemU(ti) : allocmemoryNoFree(ti.tsize);
         memset(p, 0, ti.tsize);
         return p;
     }
 
     extern (C) void* _d_newitemiT(TypeInfo ti) nothrow
     {
-        version (GC)
-            auto p = mem.isGCEnabled ? _d_newitemU(ti) : allocmemory(ti.tsize);
-        else
-            auto p = allocmemory(ti.tsize);
-
+        auto p = mem.isGCEnabled ? _d_newitemU(ti) : allocmemoryNoFree(ti.tsize);
         const initializer = ti.initializer;
         memcpy(p, initializer.ptr, initializer.length);
         return p;

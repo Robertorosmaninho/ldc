@@ -43,9 +43,16 @@ struct ObjcClassDeclaration
     Identifier* identifier;
     ClassDeclaration* classDeclaration;
     ClassDeclaration* metaclass;
-    Dsymbols* methodList;
+    DArray<FuncDeclaration*> methodList;
 
     bool isRootClass() const;
+};
+
+struct ObjcFuncDeclaration
+{
+    ObjcSelector* selector;
+    VarDeclaration* selectorParameter;
+    bool isOptional;
 };
 
 class Objc
@@ -55,12 +62,14 @@ public:
 
     virtual void setObjc(ClassDeclaration* cd) = 0;
     virtual void setObjc(InterfaceDeclaration*) = 0;
-    virtual void deprecate(InterfaceDeclaration*) const = 0;
+    virtual const char *toPrettyChars(ClassDeclaration *cd, bool qualifyTypes) const = 0;
 
     virtual void setSelector(FuncDeclaration*, Scope* sc) = 0;
     virtual void validateSelector(FuncDeclaration* fd) = 0;
     virtual void checkLinkage(FuncDeclaration* fd) = 0;
     virtual bool isVirtual(const FuncDeclaration*) const = 0;
+    virtual void setAsOptional(FuncDeclaration *fd, Scope *sc) const = 0;
+    virtual void validateOptional(FuncDeclaration *fd) const = 0;
     virtual ClassDeclaration* getParent(FuncDeclaration*, ClassDeclaration*) const = 0;
     virtual void addToClassMethodList(FuncDeclaration*, ClassDeclaration*) const = 0;
     virtual AggregateDeclaration* isThis(FuncDeclaration* fd) = 0;

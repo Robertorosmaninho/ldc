@@ -35,6 +35,7 @@ public:
     void visit(AST.StaticAssert s) { visit(cast(AST.Dsymbol)s); }
     void visit(AST.DebugSymbol s) { visit(cast(AST.Dsymbol)s); }
     void visit(AST.VersionSymbol s) { visit(cast(AST.Dsymbol)s); }
+    void visit(AST.AliasAssign s) { visit(cast(AST.Dsymbol)s); }
 
     // ScopeDsymbols
     void visit(AST.Package s) { visit(cast(AST.ScopeDsymbol)s); }
@@ -147,6 +148,7 @@ public:
     void visit(AST.TypeNext t) { visit(cast(AST.Type)t); }
     void visit(AST.TypeQualified t) { visit(cast(AST.Type)t); }
     void visit(AST.TypeTraits t) { visit(cast(AST.Type)t); }
+    void visit(AST.TypeMixin t) { visit(cast(AST.Type)t); }
 
     // TypeNext
     void visit(AST.TypeReference t) { visit(cast(AST.TypeNext)t); }
@@ -181,7 +183,7 @@ public:
     void visit(AST.NewExp e) { visit(cast(AST.Expression)e); }
     void visit(AST.AssocArrayLiteralExp e) { visit(cast(AST.Expression)e); }
     void visit(AST.ArrayLiteralExp e) { visit(cast(AST.Expression)e); }
-    void visit(AST.CompileExp e) { visit(cast(AST.Expression)e); }
+    void visit(AST.MixinExp e) { visit(cast(AST.Expression)e); }
     void visit(AST.FuncExp e) { visit(cast(AST.Expression)e); }
     void visit(AST.IntervalExp e) { visit(cast(AST.Expression)e); }
     void visit(AST.TypeExp e) { visit(cast(AST.Expression)e); }

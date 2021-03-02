@@ -19,14 +19,14 @@ set(source_name cmakeExtractDMDSystemLinker)
 set(source_file ${CMAKE_BINARY_DIR}/${source_name}.d)
 file(WRITE ${source_file} "void main() {}")
 
-# Compile the file in verbose mode and capture the compiler's stdout.
+# Compile & link the file in verbose mode and capture the compiler's stdout.
 set(result_code)
 set(stdout)
 set(stderr)
 if(UNIX)
-    separate_arguments(cmdflags UNIX_COMMAND "${D_COMPILER_FLAGS} ${DDMD_DFLAGS} ${DDMD_LFLAGS}")
+    separate_arguments(cmdflags UNIX_COMMAND "${D_COMPILER_FLAGS} ${DFLAGS_BASE}")
 else()
-    separate_arguments(cmdflags WINDOWS_COMMAND "${D_COMPILER_FLAGS} ${DDMD_DFLAGS} ${DDMD_LFLAGS}")
+    separate_arguments(cmdflags WINDOWS_COMMAND "${D_COMPILER_FLAGS} ${DFLAGS_BASE}")
 endif()
 execute_process(
     COMMAND ${D_COMPILER} ${cmdflags} -v ${source_file}
@@ -37,8 +37,8 @@ execute_process(
     ERROR_STRIP_TRAILING_WHITESPACE
 )
 
-if(result_code)
-    message(FATAL_ERROR "Failed to compile empty program using D compiler '${D_COMPILER}'")
+if(NOT "${result_code}" STREQUAL "0")
+    message(FATAL_ERROR "Failed to link empty D program using '${D_COMPILER} ${D_COMPILER_FLAGS} ${DFLAGS_BASE}':\n${stderr}")
 endif()
 
 if("${D_COMPILER_ID}" STREQUAL "GDMD")

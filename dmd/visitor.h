@@ -82,6 +82,7 @@ class TypeTuple;
 class TypeSlice;
 class TypeNull;
 class TypeTraits;
+class TypeMixin;
 
 class Dsymbol;
 
@@ -121,6 +122,7 @@ class Module;
 class WithScopeSymbol;
 class ArrayScopeSymbol;
 class Nspace;
+class AliasAssign;
 
 class AggregateDeclaration;
 class StructDeclaration;
@@ -210,7 +212,7 @@ class IsExp;
 class UnaExp;
 class BinExp;
 class BinAssignExp;
-class CompileExp;
+class MixinExp;
 class ImportExp;
 class AssertExp;
 class DotIdExp;
@@ -323,6 +325,7 @@ public:
     virtual void visit(StaticAssert *s) { visit((Dsymbol *)s); }
     virtual void visit(DebugSymbol *s) { visit((Dsymbol *)s); }
     virtual void visit(VersionSymbol *s) { visit((Dsymbol *)s); }
+    virtual void visit(AliasAssign *s) { visit((Dsymbol *)s); }
 
     // ScopeDsymbols
     virtual void visit(Package *s) { visit((ScopeDsymbol *)s); }
@@ -431,6 +434,7 @@ public:
     virtual void visit(TypeNext *t) { visit((Type *)t); }
     virtual void visit(TypeQualified *t) { visit((Type *)t); }
     virtual void visit(TypeTraits *t) { visit((Type *)t); }
+    virtual void visit(TypeMixin *t) { visit((Type *)t); }
 
     // TypeNext
     virtual void visit(TypeReference *t) { visit((TypeNext *)t); }
@@ -464,7 +468,7 @@ public:
     virtual void visit(NewExp *e) { visit((Expression *)e); }
     virtual void visit(AssocArrayLiteralExp *e) { visit((Expression *)e); }
     virtual void visit(ArrayLiteralExp *e) { visit((Expression *)e); }
-    virtual void visit(CompileExp *e) { visit((Expression *)e); }
+    virtual void visit(MixinExp *e) { visit((Expression *)e); }
     virtual void visit(FuncExp *e) { visit((Expression *)e); }
     virtual void visit(IntervalExp *e) { visit((Expression *)e); }
     virtual void visit(TypeExp *e) { visit((Expression *)e); }

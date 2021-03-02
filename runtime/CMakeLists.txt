@@ -1,6 +1,6 @@
 project(runtime C)
 
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.4.3)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -37,7 +37,7 @@ set(MULTILIB              OFF                                 CACHE BOOL   "Buil
 set(BUILD_LTO_LIBS        OFF                                 CACHE BOOL   "Also build the runtime as LLVM bitcode libraries for LTO")
 set(INCLUDE_INSTALL_DIR   ${CMAKE_INSTALL_PREFIX}/include/d   CACHE PATH   "Path to install D modules to")
 set(BUILD_SHARED_LIBS     AUTO                                CACHE STRING "Whether to build the runtime as a shared library (ON|OFF|BOTH)")
-set(D_FLAGS               -w;-de;-dip1000                     CACHE STRING "Runtime D compiler flags, separated by ';'")
+set(D_FLAGS               -w;-de;-dip1000;-preview=dtorfields CACHE STRING "Runtime D compiler flags, separated by ';'")
 set(D_EXTRA_FLAGS         ""                                  CACHE STRING "Runtime extra D compiler flags, separated by ';'")
 set(D_FLAGS_DEBUG         -g;-link-defaultlib-debug;-d-debug  CACHE STRING "Runtime D compiler flags (debug libraries), separated by ';'")
 set(D_FLAGS_RELEASE       -O3;-release                        CACHE STRING "Runtime D compiler flags (release libraries), separated by ';'")
@@ -47,15 +47,14 @@ set(RT_CFLAGS             ""                                  CACHE STRING "Runt
 set(LD_FLAGS              ""                                  CACHE STRING "Runtime extra C linker flags, separated by ' '")
 set(C_SYSTEM_LIBS         AUTO                                CACHE STRING "C system libraries for linking shared libraries and test runners, separated by ';'")
 set(TARGET_SYSTEM         AUTO                                CACHE STRING "Target OS/toolchain for cross-compilation (e.g., 'Linux;UNIX', 'Darwin;APPLE;UNIX', 'Windows;MSVC')")
-set(LDC_TARGET_PRESET     ""                                  CACHE STRING "Use a preset target configuration for cross-compilation, by passing format OS-arch (e.g., 'Linux-arm', 'Mac-x64', 'Windows-aarch64', 'Android-x86')")
 set(RT_SUPPORT_SANITIZERS OFF                                 CACHE BOOL   "Build runtime libraries with sanitizer support (e.g. for AddressSanitizer)")
 
 set(CMAKE_INSTALL_LIBDIR ${CMAKE_INSTALL_PREFIX}/lib${LIB_SUFFIX})
 
 set(DRUNTIME_EXTRA_FLAGS          -preview=fieldwise)
-set(DRUNTIME_EXTRA_UNITTEST_FLAGS -d-version=CoreUnittest -unittest -checkaction=context)
+set(DRUNTIME_EXTRA_UNITTEST_FLAGS -d-version=CoreUnittest -unittest -checkaction=context -linkonce-templates)
 set(PHOBOS2_EXTRA_FLAGS           -transition=complex)
-set(PHOBOS2_EXTRA_UNITTEST_FLAGS  -d-version=StdUnittest -unittest)
+set(PHOBOS2_EXTRA_UNITTEST_FLAGS  -d-version=StdUnittest -unittest -linkonce-templates)
 
 # Shadow the D_FLAGS cache variable by a regular variable containing all base D flags
 set(D_FLAGS ${D_FLAGS} ${D_EXTRA_FLAGS})
@@ -63,15 +62,6 @@ if (RT_SUPPORT_SANITIZERS)
     message(STATUS "Building runtime libraries with sanitizer support")
     list(APPEND D_FLAGS -d-version=SupportSanitizers)
 endif()
-
-# Find gnu make, use specific version first (BSD) and fall back to default 'make' (LINUX)
-find_program(GNU_MAKE_BIN NAMES gmake gnumake make)
-if ("${GNU_MAKE_BIN}" STREQUAL "")
-    message(FATAL_ERROR "GNU make could not be found. Please install gmake/gnumake/make using your (platform) package installer")
-endif()
-
-# Use LDC_TARGET_PRESET to configure target runtime
-include(PresetRuntimeConfiguration)
 
 # Auto-detect TARGET_SYSTEM from host
 if("${TARGET_SYSTEM}" STREQUAL "AUTO")
@@ -90,13 +80,9 @@ endif()
 
 if("${TARGET_SYSTEM}" MATCHES "UNIX")
     ENABLE_LANGUAGE(ASM)
-elseif("${TARGET_SYSTEM}" MATCHES "MSVC")
-    ENABLE_LANGUAGE(ASM_MASM)
 endif()
 
-include(CheckTypeSize)
-check_type_size(void* ptr_size)
-if(${ptr_size} MATCHES "^8$") ## if it's 64-bit OS
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(HOST_BITNESS 64)
     set(MULTILIB_SUFFIX 32)
 else()
@@ -139,6 +125,11 @@ if("${C_SYSTEM_LIBS}" STREQUAL "AUTO")
     endif()
 endif()
 
+message(STATUS "-- LDC runtime configuration:")
+message(STATUS "--  - Building 32/64-bit libraries (MULTILIB): ${MULTILIB}")
+message(STATUS "--  - Building shared libraries (BUILD_SHARED_LIBS): ${BUILD_SHARED_LIBS}")
+message(STATUS "--  - Building LTO libraries (BUILD_LTO_LIBS): ${BUILD_LTO_LIBS}")
+
 get_directory_property(PROJECT_PARENT_DIR DIRECTORY ${PROJECT_SOURCE_DIR} PARENT_DIRECTORY)
 set(RUNTIME_DIR ${PROJECT_SOURCE_DIR}/druntime CACHE PATH "druntime root directory")
 set(PHOBOS2_DIR ${PROJECT_SOURCE_DIR}/phobos CACHE PATH "Phobos root directory")
@@ -161,6 +152,7 @@ list(REMOVE_ITEM DRUNTIME_D
     ${RUNTIME_DIR}/src/rt/llmath.d
     ${RUNTIME_DIR}/src/rt/memset.d
     ${RUNTIME_DIR}/src/rt/sections_osx_x86.d
+    ${RUNTIME_DIR}/src/rt/sections_osx_x86_64.d
     ${RUNTIME_DIR}/src/rt/sections_solaris.d
     ${RUNTIME_DIR}/src/rt/sections_win32.d
 )
@@ -206,9 +198,6 @@ endif()
 # druntime C parts
 file(GLOB_RECURSE DRUNTIME_C ${RUNTIME_DIR}/src/*.c)
 list(REMOVE_ITEM DRUNTIME_C ${RUNTIME_DIR}/src/rt/dylib_fixes.c)
-if(NOT "${TARGET_SYSTEM}" MATCHES "MSVC")
-    list(REMOVE_ITEM DRUNTIME_C ${RUNTIME_DIR}/src/rt/msvc.c ${RUNTIME_DIR}/src/rt/msvc_math.c)
-endif()
 
 # druntime ASM parts
 set(DRUNTIME_ASM)
@@ -427,6 +416,7 @@ macro(dc src_files src_basedir d_flags output_basedir emit_bc all_at_once outlis
             set(outfiles ${output_o})
             set(renameCommand "")
             if(${emit_bc})
+                # rename generated *.bc to *.bc.o[bj]
                 set(renameCommand mv ${output_basedir}/${output_root}.bc ${output_bc})
                 list(APPEND outfiles ${output_bc})
             endif()
@@ -442,22 +432,21 @@ macro(dc src_files src_basedir d_flags output_basedir emit_bc all_at_once outlis
     endforeach()
 
     if(${all_at_once})
-        set(renameCommand "")
-        if(${emit_bc})
-            if(WIN32)
-                set(renameCommand find ${output_basedir} -iname '*.bc' -exec mv '{}' '{}${CMAKE_C_OUTPUT_EXTENSION}' "\;")
-            else()
-                set(renameCommand find ${output_basedir} -iname '*.bc' -exec mv '{}' '{}${CMAKE_C_OUTPUT_EXTENSION}' "\\\\;")
-            endif()
-        endif()
-
         add_custom_command(
             OUTPUT  ${new_o} ${new_bc}
             COMMAND ${LDC_EXE_FULL} ${dc_flags} -od=${output_basedir} -op ${relative_src_files}
-            COMMAND ${renameCommand}
             WORKING_DIRECTORY ${src_basedir}
             DEPENDS ${src_files} ${dc_deps}
         )
+
+        # append a rename command for each generated .bc
+        foreach(dst_bc ${new_bc})
+            string(REGEX REPLACE "${CMAKE_C_OUTPUT_EXTENSION}$" "" src_bc "${dst_bc}")
+            add_custom_command(
+                OUTPUT ${new_o} ${new_bc} APPEND
+                COMMAND mv ${src_bc} ${dst_bc}
+            )
+        endforeach()
     endif()
 
     list(APPEND ${outlist_o} ${new_o})
@@ -643,15 +632,10 @@ macro(build_runtime_libs druntime_o druntime_bc phobos2_o phobos2_bc c_flags ld_
 endmacro()
 
 # Builds a static and/or shared copy of druntime/Phobos.
-macro(build_runtime_variant d_flags c_flags ld_flags lib_suffix path_suffix all_d_files_at_once outlist_targets)
+macro(build_runtime_variant d_flags c_flags ld_flags lib_suffix path_suffix emit_bc all_d_files_at_once outlist_targets)
     set(is_unittest OFF)
     if("${lib_suffix}" MATCHES "-unittest")
         set(is_unittest ON)
-    endif()
-
-    set(emit_bc OFF)
-    if(BUILD_LTO_LIBS AND NOT is_unittest)
-        set(emit_bc ON)
     endif()
 
     # Only compile Phobos modules once for static+shared libs.
@@ -715,6 +699,7 @@ macro(build_runtime_variants d_flags c_flags ld_flags path_suffix outlist_target
         "${ld_flags}"
         ""
         "${path_suffix}"
+        "${BUILD_LTO_LIBS}"
         "${COMPILE_ALL_D_FILES_AT_ONCE}"
         ${outlist_targets}
     )
@@ -725,6 +710,7 @@ macro(build_runtime_variants d_flags c_flags ld_flags path_suffix outlist_target
         "${ld_flags}"
         "-debug"
         "${path_suffix}"
+        "OFF" # no additional bitcode/LTO objects
         "${COMPILE_ALL_D_FILES_AT_ONCE}"
         ${outlist_targets}
     )
@@ -768,7 +754,6 @@ if(MULTILIB AND "${TARGET_SYSTEM}" MATCHES "APPLE")
         list(APPEND libs_to_merge druntime-ldc.a druntime-ldc-debug.a
                                   phobos2-ldc.a  phobos2-ldc-debug.a
         )
-        # Only install the release versions of the (static-only) bitcode libraries.
         if(BUILD_LTO_LIBS)
             list(APPEND libs_to_merge druntime-ldc-lto.a phobos2-ldc-lto.a)
         endif()
@@ -832,7 +817,7 @@ else()
     # Only build the host version of the jit runtime due to LLVM dependency.
     build_jit_runtime("${D_FLAGS};${D_FLAGS_RELEASE}" "${RT_CFLAGS}" "${LD_FLAGS}" "${LIB_SUFFIX}" libs_to_install)
 
-    # Only install the release versions of the (static-only) bitcode libraries.
+    # Add the (static- and release-only) bitcode libraries.
     if(BUILD_LTO_LIBS AND (NOT ${BUILD_SHARED_LIBS} STREQUAL "ON"))
         list(APPEND libs_to_install druntime-ldc-lto phobos2-ldc-lto)
     endif()
@@ -936,7 +921,7 @@ function(build_test_runners name_suffix path_suffix d_flags linkflags is_shared)
     set(test_runner_bc "")
     dc("${RUNTIME_DIR}/src/test_runner.d"
        "${RUNTIME_DIR}/src"
-       "${d_flags}"
+       "${d_flags};-linkonce-templates"
        "${PROJECT_BINARY_DIR}/objects-unittest${target_suffix}"
        "OFF"
        "OFF"
@@ -993,6 +978,7 @@ function(build_test_runner_variant name_suffix path_suffix d_flags c_flags)
         "${linkflags}"
         "-unittest${name_suffix}"
         "${path_suffix}"
+        "OFF" # no additional bitcode/LTO objects
         "OFF" # compile separately
         unittest_libs
     )
@@ -1085,5 +1071,4 @@ if(MULTILIB AND ${HOST_BITNESS} EQUAL 64)
     add_runtime_tests_variants("${MULTILIB_SUFFIX}")
 endif()
 
-# Add the standalone druntime tests.
-include(StandaloneDRuntimeTests)
+include(DRuntimeIntegrationTests)

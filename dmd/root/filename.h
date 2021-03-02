@@ -1,6 +1,6 @@
 
 /* Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
- * All Rights Reserved, written by Walter Bright
+ * written by Walter Bright
  * http://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
  * http://www.boost.org/LICENSE_1_0.txt
@@ -38,7 +38,6 @@ public:
     bool equalsExt(const char *ext);
 
     static const char *searchPath(Strings *path, const char *name, bool cwd);
-    static const char *safeSearchPath(Strings *path, const char *name);
     static int exists(const char *name);
     static bool ensurePathExists(const char *path);
     static const char *canonicalName(const char *name);

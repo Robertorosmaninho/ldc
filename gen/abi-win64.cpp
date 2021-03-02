@@ -35,13 +35,20 @@ private:
   const bool isMSVC;
   IndirectByvalRewrite byvalRewrite;
   IntegerRewrite integerRewrite;
+  HFVAToArray hfvaToArray;
 
   bool isX87(Type *t) const {
     return !isMSVC // 64-bit reals for MSVC targets
            && (t->ty == Tfloat80 || t->ty == Timaginary80);
   }
 
-  bool passPointerToHiddenCopy(Type *t, bool isReturnValue, LINK linkage) const {
+  bool passPointerToHiddenCopy(Type *t, bool isReturnValue,
+                               TypeFunction *tf) const {
+    return passPointerToHiddenCopy(t, isReturnValue, tf->linkage, tf);
+  }
+
+  bool passPointerToHiddenCopy(Type *t, bool isReturnValue, LINK linkage,
+                               TypeFunction *tf = nullptr) const {
     // 80-bit real/ireal:
     // * returned on the x87 stack (for DMD inline asm compliance and what LLVM
     //   defaults to)
@@ -49,34 +56,49 @@ private:
     if (isX87(t))
       return !isReturnValue;
 
-    const bool isMSVCpp = isMSVC && linkage == LINKcpp;
+    const bool isMSVCpp = isMSVC && linkage == LINK::cpp;
 
+    // Handle non-PODs:
     if (isReturnValue) {
-      // MSVC++ enforces sret for non-PODs, incl. aggregates with ctors
-      // (which by itself doesn't make it a non-POD for D).
-      const bool excludeStructsWithCtor = isMSVCpp;
-      if (!isPOD(t, excludeStructsWithCtor))
+      // Enforce sret for non-PODs.
+      // MSVC++ additionally enforces it for all structs with ctors.
+      if (!isPOD(t, isMSVCpp))
         return true;
     } else {
-      // Contrary to return values, POD-ness is ignored for arguments.
-      // MSVC++ seems to enforce by-ref passing only for aggregates with
+      // MSVC++ seems to enforce by-ref passing only for structs with
       // copy ctor (incl. `= delete`).
-      if (isMSVCpp && t->ty == Tstruct) {
-        StructDeclaration *sd = static_cast<TypeStruct *>(t)->sym;
-        assert(sd);
-        if (sd->postblit || sd->hasCopyCtor)
-          return true;
+      if (isMSVCpp) {
+        if (t->ty == Tstruct) {
+          StructDeclaration *sd = static_cast<TypeStruct *>(t)->sym;
+          assert(sd);
+          if (sd->postblit || sd->hasCopyCtor)
+            return true;
+        }
+      }
+      // non-MSVC++: pass all non-PODs by ref to hidden copy
+      else if (!isPOD(t)) {
+        return true;
       }
     }
 
+    // __vectorcall: Homogeneous Vector Aggregates are passed in registers
+    const bool isD = tf ? isExternD(tf) : linkage == LINK::d;
+    if (isD && isHVA(t, hfvaToArray.maxElements))
+      return false;
+
     // Remaining aggregates which can NOT be rewritten as integers (size > 8
     // bytes or not a power of 2) are passed by ref to hidden copy.
-    return isAggregate(t) && !canRewriteAsInt(t);
+    // LDC-specific exceptions: slices and delegates are left alone (as non-
+    // rewritten IR structs) and passed/returned as 2 separate args => passed in
+    // up to 2 GP registers and returned in RAX & RDX.
+    return isAggregate(t) && !canRewriteAsInt(t) && t->ty != Tarray &&
+           t->ty != Tdelegate;
   }
 
 public:
   Win64TargetABI()
-      : isMSVC(global.params.targetTriple->isWindowsMSVCEnvironment()) {}
+      : isMSVC(global.params.targetTriple->isWindowsMSVCEnvironment()),
+        hfvaToArray(4) {}
 
   llvm::CallingConv::ID callingConv(LINK l, TypeFunction *tf = nullptr,
                                     FuncDeclaration *fd = nullptr) override {
@@ -84,13 +106,13 @@ public:
     // => let LLVM pass vectors in registers instead of passing a ref to a
     // hidden copy (both cases handled by LLVM automatically for LL vectors
     // which we don't rewrite).
-    return l == LINKd && !(tf && tf->parameterList.varargs == VARARGvariadic)
+    return l == LINK::d && !(tf && tf->parameterList.varargs == VARARGvariadic)
                ? llvm::CallingConv::X86_VectorCall
                : llvm::CallingConv::C;
   }
 
   std::string mangleFunctionForLLVM(std::string name, LINK l) override {
-    if (l == LINKd) {
+    if (l == LINK::d) {
       // Prepend a 0x1 byte to prevent LLVM from applying vectorcall/stdcall
       // mangling: _D… => _D…@<paramssize>
       name.insert(name.begin(), '\1');
@@ -99,13 +121,13 @@ public:
   }
 
   bool returnInArg(TypeFunction *tf, bool needsThis) override {
-    if (tf->isref)
+    if (tf->isref())
       return false;
 
     Type *rt = tf->next->toBasetype();
 
     // for non-static member functions, MSVC++ enforces sret for all structs
-    if (isMSVC && tf->linkage == LINKcpp && needsThis && rt->ty == Tstruct) {
+    if (isMSVC && tf->linkage == LINK::cpp && needsThis && rt->ty == Tstruct) {
       return true;
     }
 
@@ -113,8 +135,17 @@ public:
     //   are returned in a register (RAX, or XMM0 for single float/ifloat/
     //   double/idouble)
     // * 80-bit real/ireal are returned on the x87 stack
+    // * LDC-specific: slices and delegates are returned in RAX & RDX
+    // * for extern(D), vectors and Homogeneous Vector Aggregates are returned
+    //   in SIMD register(s)
     // * all other types are returned via sret
-    return passPointerToHiddenCopy(rt, /*isReturnValue=*/true, tf->linkage);
+    return passPointerToHiddenCopy(rt, /*isReturnValue=*/true, tf);
+  }
+
+  // Prefer a ref if the POD cannot be passed in a register, i.e., if
+  // IndirectByvalRewrite would be applied.
+  bool preferPassByRef(Type *t) override {
+    return passPointerToHiddenCopy(t->toBasetype(), false, LINK::d);
   }
 
   bool passByVal(TypeFunction *, Type *) override {
@@ -124,7 +155,7 @@ public:
 
   bool passThisBeforeSret(TypeFunction *tf) override {
     // required by MSVC++
-    return tf->linkage == LINKcpp;
+    return tf->linkage == LINK::cpp;
   }
 
   void rewriteFunctionType(IrFuncTy &fty) override {
@@ -163,9 +194,12 @@ public:
     Type *t = arg.type->toBasetype();
     LLType *originalLType = arg.ltype;
 
-    if (passPointerToHiddenCopy(t, isReturnValue, fty.type->linkage)) {
+    if (passPointerToHiddenCopy(t, isReturnValue, fty.type)) {
       // the caller allocates a hidden copy and passes a pointer to that copy
       byvalRewrite.applyTo(arg);
+    } else if (isExternD(fty.type) && isHVA(t, hfvaToArray.maxElements, &arg.ltype)) {
+      // rewrite Homogeneous Vector Aggregates as static array of vectors
+      hfvaToArray.applyTo(arg, arg.ltype);
     } else if (isAggregate(t) && canRewriteAsInt(t)) {
       integerRewrite.applyToIfNotObsolete(arg);
     }

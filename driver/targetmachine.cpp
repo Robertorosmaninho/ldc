@@ -183,7 +183,6 @@ static std::string getAArch64TargetCPU(const llvm::Triple &triple) {
   return "generic";
 }
 
-#if LDC_LLVM_VER >= 400
 static std::string getRiscv32TargetCPU(const llvm::Triple &triple) {
   return "generic-rv32";
 }
@@ -191,7 +190,6 @@ static std::string getRiscv32TargetCPU(const llvm::Triple &triple) {
 static std::string getRiscv64TargetCPU(const llvm::Triple &triple) {
   return "generic-rv64";
 }
-#endif
 
 /// Returns the LLVM name of the default CPU for the provided target triple.
 static std::string getTargetCPU(const llvm::Triple &triple) {
@@ -210,12 +208,10 @@ static std::string getTargetCPU(const llvm::Triple &triple) {
   case llvm::Triple::aarch64:
   case llvm::Triple::aarch64_be:
     return getAArch64TargetCPU(triple);
-#if LDC_LLVM_VER >= 400
   case llvm::Triple::riscv32:
     return getRiscv32TargetCPU(triple);
   case llvm::Triple::riscv64:
     return getRiscv64TargetCPU(triple);
-#endif
   }
 }
 
@@ -248,10 +244,7 @@ static const char *getLLVMArchSuffixForARM(llvm::StringRef CPU) {
 
 static FloatABI::Type getARMFloatABI(const llvm::Triple &triple,
                                      const char *llvmArchSuffix) {
-  switch (triple.getOS()) {
-  case llvm::Triple::Darwin:
-  case llvm::Triple::MacOSX:
-  case llvm::Triple::IOS: {
+  if (triple.isOSDarwin()) {
     // Darwin defaults to "softfp" for v6 and v7.
     if (llvm::StringRef(llvmArchSuffix).startswith("v6") ||
         llvm::StringRef(llvmArchSuffix).startswith("v7")) {
@@ -260,35 +253,34 @@ static FloatABI::Type getARMFloatABI(const llvm::Triple &triple,
     return FloatABI::Soft;
   }
 
-  case llvm::Triple::FreeBSD:
+  if (triple.isOSFreeBSD()) {
     // FreeBSD defaults to soft float
     return FloatABI::Soft;
+  }
 
+  if (triple.getVendorName().startswith("hardfloat"))
+    return FloatABI::Hard;
+  if (triple.getVendorName().startswith("softfloat"))
+    return FloatABI::SoftFP;
+
+  switch (triple.getEnvironment()) {
+  case llvm::Triple::GNUEABIHF:
+    return FloatABI::Hard;
+  case llvm::Triple::GNUEABI:
+    return FloatABI::SoftFP;
+  case llvm::Triple::EABI:
+    // EABI is always AAPCS, and if it was not marked 'hard', it's softfp
+    return FloatABI::SoftFP;
+  case llvm::Triple::Android: {
+    if (llvm::StringRef(llvmArchSuffix).startswith("v7")) {
+      return FloatABI::SoftFP;
+    }
+    return FloatABI::Soft;
+  }
   default:
-    if (triple.getVendorName().startswith("hardfloat"))
-      return FloatABI::Hard;
-    if (triple.getVendorName().startswith("softfloat"))
-      return FloatABI::SoftFP;
-
-    switch (triple.getEnvironment()) {
-    case llvm::Triple::GNUEABIHF:
-      return FloatABI::Hard;
-    case llvm::Triple::GNUEABI:
-      return FloatABI::SoftFP;
-    case llvm::Triple::EABI:
-      // EABI is always AAPCS, and if it was not marked 'hard', it's softfp
-      return FloatABI::SoftFP;
-    case llvm::Triple::Android: {
-      if (llvm::StringRef(llvmArchSuffix).startswith("v7")) {
-        return FloatABI::SoftFP;
-      }
-      return FloatABI::Soft;
-    }
-    default:
-      // Assume "soft".
-      // TODO: Warn the user we are guessing.
-      return FloatABI::Soft;
-    }
+    // Assume "soft".
+    // TODO: Warn the user we are guessing.
+    return FloatABI::Soft;
   }
 }
 
@@ -346,11 +338,7 @@ createTargetMachine(const std::string targetTriple, const std::string arch,
                     const ExplicitBitness::Type bitness,
                     FloatABI::Type &floatABI,
                     llvm::Optional<llvm::Reloc::Model> relocModel,
-#if LDC_LLVM_VER >= 600
                     llvm::Optional<llvm::CodeModel::Model> codeModel,
-#else
-                    llvm::CodeModel::Model codeModel,
-#endif
                     const llvm::CodeGenOpt::Level codeGenOptLevel,
                     const bool noLinkerStripDead) {
   // Determine target triple. If the user didn't explicitly specify one, use
@@ -459,7 +447,9 @@ createTargetMachine(const std::string targetTriple, const std::string arch,
     }
   }
 
-  llvm::TargetOptions targetOptions = opts::InitTargetOptionsFromCodeGenFlags();
+  llvm::TargetOptions targetOptions =
+      opts::InitTargetOptionsFromCodeGenFlags(triple);
+
   if (targetOptions.MCOptions.ABIName.empty())
     targetOptions.MCOptions.ABIName = getABI(triple);
 

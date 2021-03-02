@@ -57,6 +57,24 @@ version (CRuntime_Glibc)
 
 alias Strings = Array!(const(char)*);
 
+
+// Check whether character is a directory separator
+private bool isDirSeparator(char c) pure nothrow @nogc
+{
+    version (Windows)
+    {
+        return c == '\\' || c == '/';
+    }
+    else version (Posix)
+    {
+        return c == '/';
+    }
+    else
+    {
+        assert(0);
+    }
+}
+
 /***********************************************************
  * Encapsulate path and file names.
  */
@@ -114,12 +132,12 @@ nothrow:
 
         version (Windows)
         {
-            return (name[0] == '\\') || (name[0] == '/')
+            return isDirSeparator(name[0])
                 || (name.length >= 2 && name[1] == ':');
         }
         else version (Posix)
         {
-            return (name[0] == '/');
+            return isDirSeparator(name[0]);
         }
         else
         {
@@ -131,6 +149,13 @@ nothrow:
     {
         assert(absolute("/"[]) == true);
         assert(absolute(""[]) == false);
+
+        version (Windows)
+        {
+            assert(absolute(r"\"[]) == true);
+            assert(absolute(r"\\"[]) == true);
+            assert(absolute(r"c:"[]) == true);
+        }
     }
 
     /**
@@ -314,20 +339,8 @@ nothrow:
         bool hasTrailingSlash;
         if (n.length < str.length)
         {
-            version (Posix)
-            {
-                if (str[$ - n.length - 1] == '/')
-                    hasTrailingSlash = true;
-            }
-            else version (Windows)
-            {
-                if (str[$ - n.length - 1] == '\\' || str[$ - n.length - 1] == '/')
-                    hasTrailingSlash = true;
-            }
-            else
-            {
-                assert(0);
-            }
+            if (isDirSeparator(str[$ - n.length - 1]))
+                hasTrailingSlash = true;
         }
         const pathlen = str.length - n.length - (hasTrailingSlash ? 1 : 0);
         char* path = cast(char*)mem.xmalloc(pathlen + 1);
@@ -409,12 +422,12 @@ nothrow:
             const last = p[length - 1];
             version (Posix)
             {
-                if (last != '/')
+                if (!isDirSeparator(last))
                     p[length++] = '/';
             }
             else version (Windows)
             {
-                if (last != '\\' && last != '/' && last != ':')
+                if (!isDirSeparator(last) && last != ':')
                     p[length++] = '\\';
             }
             else
@@ -462,82 +475,82 @@ nothrow:
      */
     static void splitPath(int delegate(const(char)*) nothrow sink, const(char)* path)
     {
-        if (path)
+        if (!path)
+            return;
+
+        auto p = path;
+        OutBuffer buf;
+        char c;
+        do
         {
-            auto p = path;
-            OutBuffer buf;
-            char c;
-            do
+            const(char)* home;
+            bool instring = false;
+            while (isspace(*p)) // skip leading whitespace
+                ++p;
+            buf.reserve(8); // guess size of piece
+            for (;; ++p)
             {
-                const(char)* home;
-                bool instring = false;
-                while (isspace(*p)) // skip leading whitespace
-                    ++p;
-                buf.reserve(8); // guess size of piece
-                for (;; ++p)
+                c = *p;
+                switch (c)
                 {
-                    c = *p;
-                    switch (c)
+                    case '"':
+                        instring ^= false; // toggle inside/outside of string
+                        continue;
+
+                    version (OSX)
                     {
-                        case '"':
-                            instring ^= false; // toggle inside/outside of string
-                            continue;
-
-                        version (OSX)
-                        {
-                        case ',':
-                        }
-                        version (Windows)
-                        {
-                        case ';':
-                        }
-                        version (Posix)
-                        {
-                        case ':':
-                        }
-                            p++;    // ; cannot appear as part of a
-                            break;  // path, quotes won't protect it
-
-                        case 0x1A:  // ^Z means end of file
-                        case 0:
-                            break;
-
-                        case '\r':
-                            continue;  // ignore carriage returns
-
-                        version (Posix)
-                        {
-                        case '~':
-                            if (!home)
-                                home = getenv("HOME");
-                            // Expand ~ only if it is prefixing the rest of the path.
-                            if (!buf.length && p[1] == '/' && home)
-                                buf.writestring(home);
-                            else
-                                buf.writeByte('~');
-                            continue;
-                        }
-
-                        version (none)
-                        {
-                        case ' ':
-                        case '\t':         // tabs in filenames?
-                            if (!instring) // if not in string
-                                break;     // treat as end of path
-                        }
-                        default:
-                            buf.writeByte(c);
-                            continue;
+                    case ',':
                     }
-                    break;
-                }
-                if (buf.length) // if path is not empty
-                {
-                    if (sink(buf.extractChars()))
+                    version (Windows)
+                    {
+                    case ';':
+                    }
+                    version (Posix)
+                    {
+                    case ':':
+                    }
+                        p++;    // ; cannot appear as part of a
+                        break;  // path, quotes won't protect it
+
+                    case 0x1A:  // ^Z means end of file
+                    case 0:
                         break;
+
+                    case '\r':
+                        continue;  // ignore carriage returns
+
+                    version (Posix)
+                    {
+                    case '~':
+                        if (!home)
+                            home = getenv("HOME");
+                        // Expand ~ only if it is prefixing the rest of the path.
+                        if (!buf.length && p[1] == '/' && home)
+                            buf.writestring(home);
+                        else
+                            buf.writeByte('~');
+                        continue;
+                    }
+
+                    version (none)
+                    {
+                    case ' ':
+                    case '\t':         // tabs in filenames?
+                        if (!instring) // if not in string
+                            break;     // treat as end of path
+                    }
+                    default:
+                        buf.writeByte(c);
+                        continue;
                 }
-            } while (c);
-        }
+                break;
+            }
+            if (buf.length) // if path is not empty
+            {
+                if (sink(buf.extractChars()))
+                    break;
+            }
+        } while (c);
     }
 
     /**
@@ -718,97 +731,106 @@ nothrow:
         return null;
     }
 
-    /*************************************
-     * Search Path for file in a safe manner.
-     *
-     * Be wary of CWE-22: Improper Limitation of a Pathname to a Restricted Directory
-     * ('Path Traversal') attacks.
-     *      http://cwe.mitre.org/data/definitions/22.html
-     * More info:
-     *      https://www.securecoding.cert.org/confluence/display/c/FIO02-C.+Canonicalize+path+names+originating+from+tainted+sources
+    /************************************
+     * Determine if path contains reserved character.
+     * Params:
+     *  name = path
      * Returns:
-     *      NULL    file not found
-     *      !=NULL  mem.xmalloc'd file name
+     *  index of the first reserved character in path if found, size_t.max otherwise
      */
-    extern (C++) static const(char)* safeSearchPath(Strings* path, const(char)* name)
+    extern (D) static size_t findReservedChar(const(char)* name) pure @nogc
     {
         version (Windows)
         {
-            // don't allow leading / because it might be an absolute
-            // path or UNC path or something we'd prefer to just not deal with
-            if (*name == '/')
-            {
-                return null;
-            }
-            /* Disallow % \ : and .. in name characters
-             * We allow / for compatibility with subdirectories which is allowed
-             * on dmd/posix. With the leading / blocked above and the rest of these
-             * conservative restrictions, we should be OK.
-             */
-            for (const(char)* p = name; *p; p++)
+            size_t idx = 0;
+            // According to https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file#naming-conventions
+            // the following characters are not allowed in path: < > : " | ? *
+            for (const(char)* p = name; *p; p++, idx++)
             {
                 char c = *p;
-                if (c == '\\' || c == ':' || c == '%' || (c == '.' && p[1] == '.') || (c == '/' && p[1] == '/'))
+                if (c == '<' || c == '>' || c == ':' || c == '"' || c == '|' || c == '?' || c == '*')
                 {
-                    return null;
+                    return idx;
                 }
             }
-            return FileName.searchPath(path, name, false);
-        }
-        else version (Posix)
-        {
-            /* Even with realpath(), we must check for // and disallow it
-             */
-            for (const(char)* p = name; *p; p++)
-            {
-                char c = *p;
-                if (c == '/' && p[1] == '/')
-                {
-                    return null;
-                }
-            }
-            if (path)
-            {
-                /* Each path is converted to a cannonical name and then a check is done to see
-                 * that the searched name is really a child one of the the paths searched.
-                 */
-                for (size_t i = 0; i < path.dim; i++)
-                {
-                    const(char)* cname = null;
-                    const(char)* cpath = canonicalName((*path)[i]);
-                    //printf("FileName::safeSearchPath(): name=%s; path=%s; cpath=%s\n",
-                    //      name, (char *)path.data[i], cpath);
-                    if (cpath is null)
-                        goto cont;
-                    cname = canonicalName(combine(cpath, name));
-                    //printf("FileName::safeSearchPath(): cname=%s\n", cname);
-                    if (cname is null)
-                        goto cont;
-                    //printf("FileName::safeSearchPath(): exists=%i "
-                    //      "strncmp(cpath, cname, %i)=%i\n", exists(cname),
-                    //      strlen(cpath), strncmp(cpath, cname, strlen(cpath)));
-                    // exists and name is *really* a "child" of path
-                    if (exists(cname) && strncmp(cpath, cname, strlen(cpath)) == 0)
-                    {
-                        mem.xfree(cast(void*)cpath);
-                        const(char)* p = mem.xstrdup(cname);
-                        mem.xfree(cast(void*)cname);
-                        return p;
-                    }
-                cont:
-                    if (cpath)
-                        mem.xfree(cast(void*)cpath);
-                    if (cname)
-                        mem.xfree(cast(void*)cname);
-                }
-            }
-            return null;
+            return size_t.max;
         }
         else
         {
-            assert(0);
+            return size_t.max;
         }
     }
+    unittest
+    {
+        assert(findReservedChar(r"") == size_t.max);
+        assert(findReservedChar(r" abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.-_=+()") == size_t.max);
+
+        version (Windows)
+        {
+            assert(findReservedChar(` < `) == 1);
+            assert(findReservedChar(` >`) == 1);
+            assert(findReservedChar(`: `) == 0);
+            assert(findReservedChar(`"`) == 0);
+            assert(findReservedChar(`|`) == 0);
+            assert(findReservedChar(`?`) == 0);
+            assert(findReservedChar(`*`) == 0);
+        }
+        else
+        {
+            assert(findReservedChar(`<>:"|?*`) == size_t.max);
+        }
+    }
+
+    /************************************
+     * Determine if path has a reference to parent directory.
+     * Params:
+     *  name = path
+     * Returns:
+     *  true if path contains '..' reference to parent directory
+     */
+    extern (D) static bool refersToParentDir(const(char)* name) pure @nogc
+    {
+        if (name[0] == '.' && name[1] == '.' && (!name[2] || isDirSeparator(name[2])))
+        {
+            return true;
+        }
+
+        for (const(char)* p = name; *p; p++)
+        {
+            char c = *p;
+            if (isDirSeparator(c) && p[1] == '.' && p[2] == '.' && (!p[3] || isDirSeparator(p[3])))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    unittest
+    {
+        assert(!refersToParentDir(r""));
+        assert(!refersToParentDir(r"foo"));
+        assert(!refersToParentDir(r"foo.."));
+        assert(!refersToParentDir(r"foo..boo"));
+        assert(!refersToParentDir(r"foo/..boo"));
+        assert(!refersToParentDir(r"foo../boo"));
+        assert(refersToParentDir(r".."));
+        assert(refersToParentDir(r"../"));
+        assert(refersToParentDir(r"foo/.."));
+        assert(refersToParentDir(r"foo/../"));
+        assert(refersToParentDir(r"foo/../../boo"));
+
+        version (Windows)
+        {
+            // Backslash as directory separator
+            assert(!refersToParentDir(r"foo\..boo"));
+            assert(!refersToParentDir(r"foo..\boo"));
+            assert(refersToParentDir(r"..\"));
+            assert(refersToParentDir(r"foo\.."));
+            assert(refersToParentDir(r"foo\..\"));
+            assert(refersToParentDir(r"foo\..\..\boo"));
+        }
+    }
+
 
     /**
        Check if the file the `path` points to exists
@@ -937,7 +959,7 @@ nothrow:
     }
 
     /******************************************
-     * Return canonical version of name in a malloc'd buffer.
+     * Return canonical version of name.
      * This code is high risk.
      */
     extern (C++) static const(char)* canonicalName(const(char)* name)
@@ -982,14 +1004,16 @@ nothrow:
                 char[PATH_MAX] buf = void;
                 auto path = name.toCStringThen!((n) => realpath(n.ptr, buf.ptr));
                 if (path !is null)
-                    return mem.xstrdup(path).toDString;
+                    return xarraydup(path.toDString);
             }
             else static if (__traits(compiles, canonicalize_file_name))
             {
                 // Have canonicalize_file_name, which malloc's memory.
+                // We need a dmd.root.rmem allocation though.
                 auto path = name.toCStringThen!((n) => canonicalize_file_name(n.ptr));
+                scope(exit) .free(path.ptr);
                 if (path !is null)
-                    return path.toDString;
+                    return xarraydup(path.toDString);
             }
             else static if (__traits(compiles, _PC_PATH_MAX))
             {
@@ -1001,14 +1025,14 @@ nothrow:
                     scope(exit) mem.xfree(buf);
                     auto path = name.toCStringThen!((n) => realpath(n.ptr, buf));
                     if (path !is null)
-                        return mem.xstrdup(path).toDString;
+                        return xarraydup(path.toDString);
                 }
             }
             // Give up trying to support this platform, just duplicate the filename
             // unless there is nothing to copy from.
             if (!name.length)
                 return null;
-            return mem.xstrdup(name.ptr)[0 .. name.length];
+            return xarraydup(name);
         }
         else version (Windows)
         {
@@ -1018,24 +1042,33 @@ nothrow:
                 /* Apparently, there is no good way to do this on Windows.
                  * GetFullPathName isn't it, but use it anyway.
                  */
-                // First find out how long the buffer has to be.
-                const fullPathLength = GetFullPathNameW(&wname[0], 0, null, null);
-                if (!fullPathLength) return null;
-                auto fullPath = (cast(wchar*) mem.xmalloc_noscan((fullPathLength + 1) * wchar.sizeof))[0 .. fullPathLength + 1];
-                scope(exit) mem.xfree(fullPath.ptr);
+                // First find out how long the buffer has to be, incl. terminating null.
+                const capacity = GetFullPathNameW(&wname[0], 0, null, null);
+                if (!capacity) return null;
+                auto buffer = cast(wchar*) mem.xmalloc_noscan(capacity * wchar.sizeof);
+                scope(exit) mem.xfree(buffer);
 
-                // Actually get the full path name
-                const length = GetFullPathNameW(
-                    &wname[0], cast(DWORD) fullPath.length, &fullPath[0], null /*filePart*/);
-                assert(length == fullPathLength);
+                // Actually get the full path name. If the buffer is large enough,
+                // the returned length does NOT include the terminating null...
+                const length = GetFullPathNameW(&wname[0], capacity, buffer, null /*filePart*/);
+                assert(length == capacity - 1);
 
-                return toNarrowStringz(fullPath[0 .. length]);
+                return toNarrowStringz(buffer[0 .. length]);
             });
         }
         else
         {
             assert(0);
         }
+    }
+
+    unittest
+    {
+        string filename = "foo.bar";
+        const path = canonicalName(filename);
+        scope(exit) free(path.ptr);
+        assert(path.length >= filename.length);
+        assert(path[$ - filename.length .. $] == filename);
     }
 
     /********************************

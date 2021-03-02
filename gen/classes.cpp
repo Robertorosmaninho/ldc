@@ -26,7 +26,6 @@
 #include "gen/logger.h"
 #include "gen/nested.h"
 #include "gen/optimizer.h"
-#include "gen/rttibuilder.h"
 #include "gen/runtime.h"
 #include "gen/structs.h"
 #include "gen/tollvm.h"
@@ -57,7 +56,7 @@ void DtoResolveClass(ClassDeclaration *cd) {
   DtoType(cd->type);
 
   // create IrAggr
-  IrAggr *irAggr = getIrAggr(cd, true);
+  getIrAggr(cd, true);
 
   // make sure all fields really get their ir field
   for (auto vd : cd->fields) {
@@ -68,16 +67,11 @@ void DtoResolveClass(ClassDeclaration *cd) {
     }
     getIrField(vd, true);
   }
-
-  // interface only emit typeinfo and classinfo
-  if (cd->isInterfaceDeclaration()) {
-    irAggr->initializeInterface();
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DValue *DtoNewClass(Loc &loc, TypeClass *tc, NewExp *newexp) {
+DValue *DtoNewClass(const Loc &loc, TypeClass *tc, NewExp *newexp) {
   // resolve type
   DtoResolveClass(tc->sym);
 
@@ -93,7 +87,6 @@ DValue *DtoNewClass(Loc &loc, TypeClass *tc, NewExp *newexp) {
   }
   // custom allocator
   else if (newexp->allocator) {
-    DtoResolveFunction(newexp->allocator);
     DFuncValue dfn(newexp->allocator, DtoCallee(newexp->allocator));
     DValue *res = DtoCallFunction(newexp->loc, nullptr, &dfn, newexp->newargs);
     mem = DtoBitCast(DtoRVal(res), DtoType(tc), ".newclass_custom");
@@ -105,10 +98,8 @@ DValue *DtoNewClass(Loc &loc, TypeClass *tc, NewExp *newexp) {
         loc, gIR->module, useEHAlloc ? "_d_newThrowable" : "_d_allocclass");
     LLConstant *ci = DtoBitCast(getIrAggr(tc->sym)->getClassInfoSymbol(),
                                 DtoType(getClassInfoType()));
-    mem = gIR->CreateCallOrInvoke(fn, ci,
-                                  useEHAlloc ? ".newthrowable_alloc"
-                                             : ".newclass_gc_alloc")
-              .getInstruction();
+    mem = gIR->CreateCallOrInvoke(
+        fn, ci, useEHAlloc ? ".newthrowable_alloc" : ".newclass_gc_alloc");
     mem = DtoBitCast(mem, DtoType(tc),
                      useEHAlloc ? ".newthrowable" : ".newclass_gc");
     doInit = !useEHAlloc;
@@ -142,7 +133,6 @@ DValue *DtoNewClass(Loc &loc, TypeClass *tc, NewExp *newexp) {
 
     Logger::println("Calling constructor");
     assert(newexp->arguments != NULL);
-    DtoResolveFunction(newexp->member);
     DFuncValue dfn(newexp->member, DtoCallee(newexp->member), mem);
     // ignore ctor return value (C++ ctors on Posix may not return `this`)
     DtoCallFunction(newexp->loc, tc, &dfn, newexp->arguments);
@@ -160,10 +150,12 @@ DValue *DtoNewClass(Loc &loc, TypeClass *tc, NewExp *newexp) {
 void DtoInitClass(TypeClass *tc, LLValue *dst) {
   DtoResolveClass(tc->sym);
 
+  IrClass *irClass = getIrAggr(tc->sym);
+
   // Set vtable field. Doing this seperately might be optimized better.
   LLValue *tmp = DtoGEP(dst, 0u, 0, "vtbl");
-  LLValue *val = DtoBitCast(getIrAggr(tc->sym)->getVtblSymbol(),
-                            tmp->getType()->getContainedType(0));
+  LLValue *val =
+      DtoBitCast(irClass->getVtblSymbol(), tmp->getType()->getContainedType(0));
   DtoStore(val, tmp);
 
   // For D classes, set the monitor field to null.
@@ -185,7 +177,7 @@ void DtoInitClass(TypeClass *tc, LLValue *dst) {
   LLValue *dstarr = DtoGEP(dst, 0, firstDataIdx);
 
   // init symbols might not have valid types
-  LLValue *initsym = getIrAggr(tc->sym)->getInitSymbol();
+  LLValue *initsym = irClass->getInitSymbol();
   initsym = DtoBitCast(initsym, DtoType(tc));
   LLValue *srcarr = DtoGEP(initsym, 0, firstDataIdx);
 
@@ -194,7 +186,7 @@ void DtoInitClass(TypeClass *tc, LLValue *dst) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void DtoFinalizeClass(Loc &loc, LLValue *inst) {
+void DtoFinalizeClass(const Loc &loc, LLValue *inst) {
   // get runtime function
   llvm::Function *fn =
       getRuntimeFunction(loc, gIR->module, "_d_callfinalizer");
@@ -205,7 +197,7 @@ void DtoFinalizeClass(Loc &loc, LLValue *inst) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void DtoFinalizeScopeClass(Loc &loc, LLValue *inst, bool hasDtor) {
+void DtoFinalizeScopeClass(const Loc &loc, LLValue *inst, bool hasDtor) {
   if (!isOptimizationEnabled() || hasDtor) {
     DtoFinalizeClass(loc, inst);
     return;
@@ -222,16 +214,16 @@ void DtoFinalizeScopeClass(Loc &loc, LLValue *inst, bool hasDtor) {
                           getNullValue(monitor->getType()), ".hasMonitor");
   llvm::BranchInst::Create(ifbb, endbb, hasMonitor, gIR->scopebb());
 
-  gIR->scope() = IRScope(ifbb);
+  gIR->ir->SetInsertPoint(ifbb);
   DtoFinalizeClass(loc, inst);
   gIR->ir->CreateBr(endbb);
 
-  gIR->scope() = IRScope(endbb);
+  gIR->ir->SetInsertPoint(endbb);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DValue *DtoCastClass(Loc &loc, DValue *val, Type *_to) {
+DValue *DtoCastClass(const Loc &loc, DValue *val, Type *_to) {
   IF_LOG Logger::println("DtoCastClass(%s, %s)", val->type->toChars(),
                          _to->toChars());
   LOG_SCOPE;
@@ -349,7 +341,7 @@ static void resolveObjectAndClassInfoClasses() {
   DtoResolveClass(Type::typeinfoclass);
 }
 
-DValue *DtoDynamicCastObject(Loc &loc, DValue *val, Type *_to) {
+DValue *DtoDynamicCastObject(const Loc &loc, DValue *val, Type *_to) {
   // call:
   // Object _d_dynamic_cast(Object o, ClassInfo c)
 
@@ -376,7 +368,7 @@ DValue *DtoDynamicCastObject(Loc &loc, DValue *val, Type *_to) {
   assert(funcTy->getParamType(1) == cinfo->getType());
 
   // call it
-  LLValue *ret = gIR->CreateCallOrInvoke(func, obj, cinfo).getInstruction();
+  LLValue *ret = gIR->CreateCallOrInvoke(func, obj, cinfo);
 
   // cast return value
   ret = DtoBitCast(ret, DtoType(_to));
@@ -386,7 +378,7 @@ DValue *DtoDynamicCastObject(Loc &loc, DValue *val, Type *_to) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DValue *DtoDynamicCastInterface(Loc &loc, DValue *val, Type *_to) {
+DValue *DtoDynamicCastInterface(const Loc &loc, DValue *val, Type *_to) {
   // call:
   // Object _d_interface_cast(void* p, ClassInfo c)
 
@@ -410,7 +402,7 @@ DValue *DtoDynamicCastInterface(Loc &loc, DValue *val, Type *_to) {
   cinfo = DtoBitCast(cinfo, funcTy->getParamType(1));
 
   // call it
-  LLValue *ret = gIR->CreateCallOrInvoke(func, ptr, cinfo).getInstruction();
+  LLValue *ret = gIR->CreateCallOrInvoke(func, ptr, cinfo);
 
   // cast return value
   ret = DtoBitCast(ret, DtoType(_to));
@@ -420,8 +412,7 @@ DValue *DtoDynamicCastInterface(Loc &loc, DValue *val, Type *_to) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-LLValue *DtoVirtualFunctionPointer(DValue *inst, FuncDeclaration *fdecl,
-                                   const char *name) {
+LLValue *DtoVirtualFunctionPointer(DValue *inst, FuncDeclaration *fdecl) {
   // sanity checks
   assert(fdecl->isVirtual());
   assert(!fdecl->isFinalFunc());
@@ -441,8 +432,8 @@ LLValue *DtoVirtualFunctionPointer(DValue *inst, FuncDeclaration *fdecl,
   // load vtbl ptr
   funcval = DtoLoad(funcval);
   // index vtbl
-  std::string vtblname = name;
-  vtblname.append("@vtbl");
+  const std::string name = fdecl->toChars();
+  const auto vtblname = name + "@vtbl";
   funcval = DtoGEP(funcval, 0, fdecl->vtblIndex, vtblname.c_str());
   // load opaque pointer
   funcval = DtoAlignedLoad(funcval);
@@ -458,275 +449,4 @@ LLValue *DtoVirtualFunctionPointer(DValue *inst, FuncDeclaration *fdecl,
   IF_LOG Logger::cout() << "funcval casted: " << *funcval << '\n';
 
   return funcval;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-#if GENERATE_OFFTI
-
-// build a single element for the OffsetInfo[] of ClassInfo
-static LLConstant *build_offti_entry(ClassDeclaration *cd, VarDeclaration *vd) {
-  std::vector<LLConstant *> inits(2);
-
-  // size_t offset;
-  //
-  assert(vd->ir.irField);
-  // grab the offset from llvm and the formal class type
-  size_t offset =
-      gDataLayout->getStructLayout(isaStruct(cd->type->ir.type->get()))
-          ->getElementOffset(vd->ir.irField->index);
-  // offset nested struct/union fields
-  offset += vd->ir.irField->unionOffset;
-
-  // assert that it matches DMD
-  Logger::println("offsets: %lu vs %u", offset, vd->offset);
-  assert(offset == vd->offset);
-
-  inits[0] = DtoConstSize_t(offset);
-
-  // TypeInfo ti;
-  inits[1] = DtoTypeInfoOf(vd->type);
-
-  // done
-  return llvm::ConstantStruct::get(inits);
-}
-
-static LLConstant *build_offti_array(ClassDeclaration *cd, LLType *arrayT) {
-  IrAggr *iraggr = cd->ir->irAggr;
-
-  size_t nvars = iraggr->varDecls.size();
-  std::vector<LLConstant *> arrayInits(nvars);
-
-  for (size_t i = 0; i < nvars; i++) {
-    arrayInits[i] = build_offti_entry(cd, iraggr->varDecls[i]);
-  }
-
-  LLConstant *size = DtoConstSize_t(nvars);
-  LLConstant *ptr;
-
-  if (nvars == 0)
-    return LLConstant::getNullValue(arrayT);
-
-  // array type
-  LLArrayType *arrTy = llvm::ArrayType::get(arrayInits[0]->getType(), nvars);
-  LLConstant *arrInit = LLConstantArray::get(arrTy, arrayInits);
-
-  // create symbol
-  llvm::GlobalVariable *gvar =
-      getOrCreateGlobal(cd->loc, gIR->module, arrTy, true,
-                        llvm::GlobalValue::InternalLinkage, arrInit, ".offti");
-  ptr = DtoBitCast(gvar, getPtrToType(arrTy->getElementType()));
-
-  return DtoConstSlice(size, ptr);
-}
-
-#endif // GENERATE_OFFTI
-
-static LLConstant *build_class_dtor(ClassDeclaration *cd) {
-  FuncDeclaration *dtor = cd->tidtor;
-
-  // if no destructor emit a null
-  if (!dtor) {
-    return getNullPtr(getVoidPtrType());
-  }
-
-  DtoResolveFunction(dtor);
-  return llvm::ConstantExpr::getBitCast(
-      DtoCallee(dtor), getPtrToType(LLType::getInt8Ty(gIR->context())));
-}
-
-static unsigned build_classinfo_flags(ClassDeclaration *cd) {
-  // adapted from original dmd code:
-  // toobj.c: ToObjFile::visit(ClassDeclaration*) and
-  // ToObjFile::visit(InterfaceDeclaration*)
-
-  auto flags = ClassFlags::hasOffTi | ClassFlags::hasTypeInfo;
-  if (cd->isInterfaceDeclaration()) {
-    if (cd->isCOMinterface()) {
-      flags |= ClassFlags::isCOMclass;
-    }
-    return flags;
-  }
-
-  if (cd->isCOMclass()) {
-    flags |= ClassFlags::isCOMclass;
-  }
-  if (cd->isCPPclass()) {
-    flags |= ClassFlags::isCPPclass;
-  }
-  flags |= ClassFlags::hasGetMembers;
-  if (cd->ctor) {
-    flags |= ClassFlags::hasCtor;
-  }
-  for (ClassDeclaration *pc = cd; pc; pc = pc->baseClass) {
-    if (pc->dtor) {
-      flags |= ClassFlags::hasDtor;
-      break;
-    }
-  }
-  if (cd->isAbstract()) {
-    flags |= ClassFlags::isAbstract;
-  }
-  for (ClassDeclaration *pc = cd; pc; pc = pc->baseClass) {
-    if (pc->members) {
-      for (Dsymbol *sm : *pc->members) {
-        // printf("sm = %s %s\n", sm->kind(), sm->toChars());
-        if (sm->hasPointers()) {
-          return flags;
-        }
-      }
-    }
-  }
-  flags |= ClassFlags::noPointers;
-
-  return flags;
-}
-
-LLConstant *DtoDefineClassInfo(ClassDeclaration *cd) {
-  //     The layout is:
-  //       {
-  //         void **vptr;
-  //         monitor_t monitor;
-  //         byte[] init;
-  //         string name;
-  //         void*[] vtbl;
-  //         Interface[] interfaces;
-  //         TypeInfo_Class base;
-  //         void *destructor;
-  //         void function(Object) classInvariant;
-  //         ClassFlags m_flags;
-  //         void* deallocator;
-  //         OffsetTypeInfo[] m_offTi;
-  //         void function(Object) defaultConstructor;
-  //         immutable(void)* m_RTInfo;
-  //       }
-
-  IF_LOG Logger::println("DtoDefineClassInfo(%s)", cd->toChars());
-  LOG_SCOPE;
-
-  assert(cd->type->ty == Tclass);
-
-  IrAggr *ir = getIrAggr(cd);
-  Type *const cinfoType = getClassInfoType(); // check declaration in object.d
-  ClassDeclaration *const cinfo = Type::typeinfoclass;
-
-  if (cinfo->fields.length != 12) {
-    error(Loc(), "Unexpected number of fields in `object.ClassInfo`; "
-                 "druntime version does not match compiler (see -v)");
-    fatal();
-  }
-
-  // use the rtti builder
-  RTTIBuilder b(cinfoType);
-
-  LLConstant *c;
-
-  LLType *voidPtr = getVoidPtrType();
-  LLType *voidPtrPtr = getPtrToType(voidPtr);
-
-  // adapted from original dmd code
-  // init[]
-  if (cd->isInterfaceDeclaration()) {
-    b.push_null_void_array();
-  } else {
-    size_t initsz = cd->size(Loc());
-    b.push_void_array(initsz, ir->getInitSymbol());
-  }
-
-  // name[]
-  const char *name = cd->ident->toChars();
-  size_t namelen = strlen(name);
-  if (!(namelen > 9 && memcmp(name, "TypeInfo_", 9) == 0)) {
-    name = cd->toPrettyChars();
-    namelen = strlen(name);
-  }
-  b.push_string(name);
-
-  // vtbl[]
-  if (cd->isInterfaceDeclaration()) {
-    b.push_array(0, getNullValue(voidPtrPtr));
-  } else {
-    c = DtoBitCast(ir->getVtblSymbol(), voidPtrPtr);
-    b.push_array(cd->vtbl.length, c);
-  }
-
-  // interfaces[]
-  b.push(ir->getClassInfoInterfaces());
-
-  // base
-  // interfaces never get a base, just the interfaces[]
-  if (cd->baseClass && !cd->isInterfaceDeclaration()) {
-    b.push_classinfo(cd->baseClass);
-  } else {
-    b.push_null(cinfoType);
-  }
-
-  // destructor
-  if (cd->isInterfaceDeclaration()) {
-    b.push_null_vp();
-  } else {
-    b.push(build_class_dtor(cd));
-  }
-
-  // invariant
-  VarDeclaration *invVar = cinfo->fields[6];
-  b.push_funcptr(cd->inv, invVar->type);
-
-  // flags
-  const unsigned flags = build_classinfo_flags(cd);
-  b.push_uint(flags);
-
-  // deallocator
-  b.push_null_vp();
-
-  // offset typeinfo
-  VarDeclaration *offTiVar = cinfo->fields[9];
-#if GENERATE_OFFTI
-  if (cd->isInterfaceDeclaration())
-    b.push_null(offTiVar->type);
-  else
-    b.push(build_offti_array(cd, DtoType(offTiVar->type)));
-#else
-  b.push_null(offTiVar->type);
-#endif
-
-  // defaultConstructor
-  VarDeclaration *defConstructorVar = cinfo->fields[10];
-  CtorDeclaration *defConstructor = cd->defaultCtor;
-  if (defConstructor && (defConstructor->storage_class & STCdisable)) {
-    defConstructor = nullptr;
-  }
-  b.push_funcptr(defConstructor, defConstructorVar->type);
-
-  // m_RTInfo
-  // The cases where getRTInfo is null are not quite here, but the code is
-  // modelled after what DMD does.
-  if (cd->getRTInfo) {
-    b.push(toConstElem(cd->getRTInfo, gIR));
-  } else if (flags & ClassFlags::noPointers) {
-    b.push_size_as_vp(0); // no pointers
-  } else {
-    b.push_size_as_vp(1); // has pointers
-  }
-
-  /*size_t n = inits.size();
-  for (size_t i=0; i<n; ++i)
-  {
-      Logger::cout() << "inits[" << i << "]: " << *inits[i] << '\n';
-  }*/
-
-  // build the initializer
-  LLType *initType = ir->classInfo->getType()->getContainedType(0);
-  LLConstant *finalinit = b.get_constant(isaStruct(initType));
-
-  // Logger::cout() << "built the classinfo initializer:\n" << *finalinit
-  // <<'\n';
-  ir->constClassInfo = finalinit;
-
-  // sanity check
-  assert(finalinit->getType() == initType &&
-         "__ClassZ initializer does not match the ClassInfo type");
-
-  // return initializer
-  return finalinit;
 }

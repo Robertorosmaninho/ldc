@@ -7,8 +7,8 @@ app:
     - BITRISE_PROJECT_PATH: ldc-build-runtime.tmp/TestRunner/TestRunner.xcodeproj
     - BITRISE_SCHEME: TestRunner
     - BITRISE_EXPORT_METHOD: development
-    - LLVM_VERSION: 10.0.0
-    - LDC_VERSION: 1.20.1
+    - LLVM_VERSION: 11.0.1
+    - HOST_LDC_VERSION: 1.24.0
     - IOS_VERSION: 12.0
 
 workflows:
@@ -33,9 +33,9 @@ workflows:
             - content: |-
                 #!/bin/bash
                 set -ex
-                curl -L "https://github.com/ldc-developers/ldc/releases/download/v${LDC_VERSION}/ldc2-${LDC_VERSION}-osx-x86_64.tar.xz" -o ldc.tar.xz
+                curl -L "https://github.com/ldc-developers/ldc/releases/download/v${HOST_LDC_VERSION}/ldc2-${HOST_LDC_VERSION}-osx-x86_64.tar.xz" -o ldc.tar.xz
                 tar xf ldc.tar.xz
-                envman add --key PATH --value "$(pwd)/ldc2-${LDC_VERSION}-osx-x86_64/bin:$PATH"
+                envman add --key PATH --value "$(pwd)/ldc2-${HOST_LDC_VERSION}-osx-x86_64/bin:$PATH"
 
       - script@1.1.6:
           title: Build LDC
@@ -53,12 +53,36 @@ workflows:
                   -DD_COMPILER=ldmd2 \
                   -DBUILD_SHARED_LIBS=OFF \
                   -DCMAKE_BUILD_TYPE=Release \
-                  -DLLVM_ROOT_DIR="$LLVM_ROOT_DIR"
+                  -DLLVM_ROOT_DIR="$LLVM_ROOT_DIR" \
+                  -DLDC_LINK_MANUALLY=OFF
                 ninja -j2
                 envman add --key LDC_BINARY --value "$(pwd)/bin/ldc2"
 
       - script@1.1.6:
-          title: Build Runtime
+          title: Cross-compile (iOS/x86_64) druntime & Phobos
+          deps:
+            brew:
+              - name: cmake
+              - name: ninja
+          inputs:
+            - content: |-
+                #!/bin/bash
+                set -ex
+                build/bin/ldc-build-runtime \
+                  --buildDir="ldc-build-runtime.x86_64" \
+                  --cFlags="-target;x86_64-apple-ios${IOS_VERSION}" \
+                  --dFlags="-mtriple=x86_64-apple-ios${IOS_VERSION};-fvisibility=hidden" \
+                  --ldcSrcDir=. \
+                  --ninja \
+                  -j 2 \
+                  CMAKE_SYSTEM_NAME=iOS \
+                  CMAKE_OSX_SYSROOT=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk \
+                  CMAKE_OSX_ARCHITECTURES=x86_64 \
+                  CMAKE_OSX_DEPLOYMENT_TARGET="${IOS_VERSION}" \
+                  BUILD_SHARED_LIBS=OFF
+
+      - script@1.1.6:
+          title: Cross-compile (iOS/arm64) druntime & Phobos, incl. debug unittest runners
           deps:
             brew:
               - name: cmake
@@ -86,7 +110,7 @@ workflows:
           run_if: not .IsPR
 
       - virtual-device-testing-for-ios@0.9.10:
-          title: Run Tests on Device
+          title: Run druntime & Phobos debug unittests on iPhone
           run_if: not .IsPR
           inputs:
             - test_devices: iphone6s,12.0,en,portrait

@@ -40,10 +40,7 @@ IrFuncTy &DtoIrTypeFunction(DValue *fnval) {
     }
   }
 
-  Type *type = stripModifiers(fnval->type->toBasetype());
-  DtoType(type);
-  assert(type->ctype);
-  return type->ctype->getIrFuncTy();
+  return getIrType(fnval->type->toBasetype(), true)->getIrFuncTy();
 }
 
 TypeFunction *DtoTypeFunction(DValue *fnval) {
@@ -253,7 +250,8 @@ static LLValue *getTypeinfoArrayArgumentForDVarArg(Expressions *argexps,
   std::vector<LLConstant *> vtypeinfos;
   vtypeinfos.reserve(numVariadicArgs);
   for (size_t i = begin; i < numArgExps; i++) {
-    vtypeinfos.push_back(DtoTypeInfoOf((*argexps)[i]->type));
+    Expression *argExp = (*argexps)[i];
+    vtypeinfos.push_back(DtoTypeInfoOf(argExp->loc, argExp->type));
   }
 
   // apply initializer
@@ -367,18 +365,10 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     }
     auto atomicOrdering =
         static_cast<llvm::AtomicOrdering>((*e->arguments)[0]->toInteger());
-#if LDC_LLVM_VER >= 500
     llvm::SyncScope::ID scope = llvm::SyncScope::System;
     if (e->arguments->length == 2) {
       scope = static_cast<llvm::SyncScope::ID>((*e->arguments)[1]->toInteger());
     }
-#else
-    auto scope = llvm::SynchronizationScope::CrossThread;
-    if (e->arguments->length == 2) {
-      scope = static_cast<llvm::SynchronizationScope>(
-          (*e->arguments)[1]->toInteger());
-    }
-#endif
     p->ir->CreateFence(atomicOrdering, scope);
     return true;
   }
@@ -413,7 +403,9 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
 
     llvm::StoreInst *ret = p->ir->CreateStore(val, ptr);
     ret->setAtomic(llvm::AtomicOrdering(atomicOrdering));
-    ret->setAlignment(LLMaybeAlign(getTypeAllocSize(val->getType())));
+    if (auto alignment = getTypeAllocSize(val->getType())) {
+      ret->setAlignment(LLAlign(alignment));
+    }
     return true;
   }
 
@@ -443,7 +435,9 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     }
 
     llvm::LoadInst *load = p->ir->CreateLoad(ptr);
-    load->setAlignment(LLMaybeAlign(getTypeAllocSize(load->getType())));
+    if (auto alignment = getTypeAllocSize(load->getType())) {
+      load->setAlignment(LLAlign(alignment));
+    }
     load->setAtomic(llvm::AtomicOrdering(atomicOrdering));
     llvm::Value *val = load;
     if (val->getType() != pointeeType) {
@@ -643,7 +637,7 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
 class ImplicitArgumentsBuilder {
 public:
   ImplicitArgumentsBuilder(std::vector<LLValue *> &args, AttrSet &attrs,
-                           Loc &loc, DValue *fnval,
+                           const Loc &loc, DValue *fnval,
                            LLFunctionType *llCalleeType, Expressions *argexps,
                            Type *resulttype, LLValue *sretPointer)
       : args(args), attrs(attrs), loc(loc), fnval(fnval), argexps(argexps),
@@ -670,7 +664,7 @@ private:
   // passed:
   std::vector<LLValue *> &args;
   AttrSet &attrs;
-  Loc &loc;
+  const Loc &loc;
   DValue *const fnval;
   Expressions *const argexps;
   Type *const resulttype;
@@ -777,7 +771,7 @@ private:
 
     if (irFty.arg_objcSelector) {
       assert(dfnval);
-      const auto selector = dfnval->func->selector;
+      const auto selector = dfnval->func->objc.selector;
       assert(selector);
       LLGlobalVariable *selptr = gIR->objc.getMethVarRef(*selector);
       args.push_back(DtoBitCast(DtoLoad(selptr), getVoidPtrType()));
@@ -802,7 +796,7 @@ private:
 ////////////////////////////////////////////////////////////////////////////////
 
 // FIXME: this function is a mess !
-DValue *DtoCallFunction(Loc &loc, Type *resulttype, DValue *fnval,
+DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
                         Expressions *arguments, LLValue *sretPointer) {
   IF_LOG Logger::println("DtoCallFunction()");
   LOG_SCOPE
@@ -876,23 +870,24 @@ DValue *DtoCallFunction(Loc &loc, Type *resulttype, DValue *fnval,
   }
 
   // call the function
-  LLCallSite call = gIR->CreateCallOrInvoke(callable, args, "", tf->isnothrow);
+  LLCallBasePtr call = gIR->funcGen().callOrInvoke(callable, callableTy, args,
+                                                   "", tf->isnothrow());
 
   // PGO: Insert instrumentation or attach profile metadata at indirect call
   // sites.
-  if (!call.getCalledFunction()) {
+  if (!call->getCalledFunction()) {
     auto &PGO = gIR->funcGen().pgo;
-    PGO.emitIndirectCallPGO(call.getInstruction(), callable);
+    PGO.emitIndirectCallPGO(call, callable);
   }
 
   // get return value
   const int sretArgIndex =
       (irFty.arg_sret && irFty.arg_this && gABI->passThisBeforeSret(tf) ? 1
                                                                         : 0);
-  LLValue *retllval =
-      (irFty.arg_sret ? args[sretArgIndex] : call.getInstruction());
+  LLValue *retllval = irFty.arg_sret ? args[sretArgIndex]
+                                     : static_cast<llvm::Instruction *>(call);
   bool retValIsLVal =
-      (tf->isref && returnTy != Tvoid) || (irFty.arg_sret != nullptr);
+      (tf->isref() && returnTy != Tvoid) || (irFty.arg_sret != nullptr);
 
   if (!retValIsLVal) {
     // let the ABI transform the return value back
@@ -912,7 +907,7 @@ DValue *DtoCallFunction(Loc &loc, Type *resulttype, DValue *fnval,
                            returntype->toChars(), rbase->toChars());
     switch (rbase->ty) {
     case Tarray:
-      if (tf->isref) {
+      if (tf->isref()) {
         retllval = DtoBitCast(retllval, DtoType(rbase->pointerTo()));
       } else {
         retllval = DtoAggrPaint(retllval, DtoType(rbase));
@@ -920,7 +915,7 @@ DValue *DtoCallFunction(Loc &loc, Type *resulttype, DValue *fnval,
       break;
 
     case Tsarray:
-      if (nextbase->ty == Tvector && !tf->isref) {
+      if (nextbase->ty == Tvector && !tf->isref()) {
         if (retValIsLVal) {
           retllval = DtoBitCast(retllval, DtoType(rbase->pointerTo()));
         } else {
@@ -937,7 +932,7 @@ DValue *DtoCallFunction(Loc &loc, Type *resulttype, DValue *fnval,
     case Tclass:
     case Taarray:
     case Tpointer:
-      if (tf->isref) {
+      if (tf->isref()) {
         retllval = DtoBitCast(retllval, DtoType(rbase->pointerTo()));
       } else {
         retllval = DtoBitCast(retllval, DtoType(rbase));
@@ -945,7 +940,7 @@ DValue *DtoCallFunction(Loc &loc, Type *resulttype, DValue *fnval,
       break;
 
     case Tstruct:
-      if (nextbase->ty == Taarray && !tf->isref) {
+      if (nextbase->ty == Taarray && !tf->isref()) {
         // In the D2 frontend, the associative array type and its
         // object.AssociativeArray representation are used
         // interchangably in some places. However, AAs are returned
@@ -1001,7 +996,7 @@ DValue *DtoCallFunction(Loc &loc, Type *resulttype, DValue *fnval,
   }
 
   // set calling convention and parameter attributes
-  LLAttributeSet &attrlist = attrs;
+  LLAttributeList &attrlist = attrs;
   if (dfnval && dfnval->func) {
     LLFunction *llfunc = llvm::dyn_cast<LLFunction>(DtoRVal(dfnval));
     if (llfunc && llfunc->isIntrinsic()) // override intrinsic attrs
@@ -1010,21 +1005,16 @@ DValue *DtoCallFunction(Loc &loc, Type *resulttype, DValue *fnval,
           gIR->context(),
           static_cast<llvm::Intrinsic::ID>(llfunc->getIntrinsicID()));
     } else {
-      call.setCallingConv(callconv);
+      call->setCallingConv(callconv);
     }
   } else {
-    call.setCallingConv(callconv);
+    call->setCallingConv(callconv);
   }
   // merge in function attributes set in callOrInvoke
-#if LDC_LLVM_VER >= 500
   attrlist = attrlist.addAttributes(
-      gIR->context(), LLAttributeSet::FunctionIndex,
-      llvm::AttrBuilder(call.getAttributes(), LLAttributeSet::FunctionIndex));
-#else
-  attrlist = attrlist.addAttributes(
-      gIR->context(), LLAttributeSet::FunctionIndex, call.getAttributes());
-#endif
-  call.setAttributes(attrlist);
+      gIR->context(), LLAttributeList::FunctionIndex,
+      llvm::AttrBuilder(call->getAttributes(), LLAttributeList::FunctionIndex));
+  call->setAttributes(attrlist);
 
   // Special case for struct constructor calls: For temporaries, using the
   // this pointer value returned from the constructor instead of the alloca

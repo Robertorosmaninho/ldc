@@ -31,8 +31,8 @@ RTTIBuilder::RTTIBuilder(Type *baseType) {
 
   DtoResolveDsymbol(ad);
 
-  if (ad->isClassDeclaration()) {
-    const auto baseir = getIrAggr(ad);
+  if (auto cd = ad->isClassDeclaration()) {
+    const auto baseir = getIrAggr(cd);
     assert(baseir && "no IrAggr for TypeInfo base class");
 
     // just start with adding the vtbl
@@ -62,11 +62,7 @@ void RTTIBuilder::push_null(Type *T) { push(getNullValue(DtoType(T))); }
 
 void RTTIBuilder::push_null_vp() { push(getNullValue(getVoidPtrType())); }
 
-void RTTIBuilder::push_typeinfo(Type *t) { push(DtoTypeInfoOf(t)); }
-
-void RTTIBuilder::push_classinfo(ClassDeclaration *cd) {
-  push(getIrAggr(cd)->getClassInfoSymbol());
-}
+void RTTIBuilder::push_typeinfo(Type *t) { push(DtoTypeInfoOf(Loc(), t)); }
 
 void RTTIBuilder::push_string(const char *str) { push(DtoConstString(str)); }
 
@@ -135,7 +131,6 @@ void RTTIBuilder::push_size_as_vp(uint64_t s) {
 
 void RTTIBuilder::push_funcptr(FuncDeclaration *fd, Type *castto) {
   if (fd) {
-    DtoResolveFunction(fd);
     LLConstant *F = DtoCallee(fd);
     if (castto) {
       F = DtoBitCast(F, DtoType(castto));

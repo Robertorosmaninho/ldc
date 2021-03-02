@@ -43,12 +43,16 @@ import dmd.root.rootobject;
 import dmd.root.string;
 import dmd.semantic2;
 import dmd.semantic3;
+import dmd.utils;
 import dmd.visitor;
 version (IN_LLVM)
 {
     import dmd.root.aav;
     import dmd.root.array;
     import dmd.root.rmem;
+
+    // in driver/main.cpp
+    extern (C++) const(char)* createTempObjectsDir();
 }
 
 version(Windows) {
@@ -145,6 +149,24 @@ void semantic3OnDependencies(Module m)
 
     foreach (i; 1 .. m.aimports.dim)
         semantic3OnDependencies(m.aimports[i]);
+}
+
+/**
+ * Remove generated .di files on error and exit
+ */
+void removeHdrFilesAndFail(ref Param params, ref Modules modules)
+{
+    if (params.doHdrGeneration)
+    {
+        foreach (m; modules)
+        {
+            if (m.isHdrFile)
+                continue;
+            File.remove(m.hdrfile.toChars());
+        }
+    }
+
+    fatal();
 }
 
 /**
@@ -429,6 +451,7 @@ extern (C++) final class Module : Package
     uint numlines;              // number of lines in source file
     bool isHdrFile;             // if it is a header (.di) file
     bool isDocFile;             // if it is a documentation input file, not D source
+    bool hasAlwaysInlines;      // contains references to functions that must be inlined
     bool isPackageFile;         // if it is a package.d
     Package pkg;                // if isPackageFile is true, the Package that contains this package.d
     Strings contentImportedFiles; // array of files whose content was imported
@@ -623,8 +646,6 @@ else
             m.importedFrom = m;
             assert(m.isRoot());
         }
-
-        Compiler.loadModule(m);
         return m;
     }
 
@@ -684,6 +705,17 @@ else
             // If argdoc doesn't have an absolute path, make it relative to dir
             if (!FileName.absolute(argdoc))
             {
+version (IN_LLVM)
+{
+                if (!dir.length && global.params.cleanupObjectFiles)
+                {
+                    __gshared const(char)[] tempObjectsDir;
+                    if (!tempObjectsDir.length)
+                        tempObjectsDir = createTempObjectsDir().toDString;
+
+                    dir = tempObjectsDir;
+                }
+}
                 //FileName::ensurePathExists(dir);
                 argdoc = FileName.combine(dir, argdoc);
             }
@@ -756,14 +788,20 @@ else
                     fprintf(stderr, "import path[%llu] = %s\n", cast(ulong)i, p);
             }
             else
+            {
                 fprintf(stderr, "Specify path to file '%s' with -I switch\n", srcfile.toChars());
-            // fatal();
+            }
+
+            removeHdrFilesAndFail(global.params, Module.amodules);
         }
         return false;
     }
 
     /**
      * Reads the file from `srcfile` and loads the source buffer.
+     *
+     * If makefile module dependency is requested, we add this module
+     * to the list of dependencies from here.
      *
      * Params:
      *  loc = the location
@@ -778,6 +816,11 @@ else
 
         //printf("Module::read('%s') file '%s'\n", toChars(), srcfile.toChars());
         auto readResult = File.read(srcfile.toChars());
+
+        if (global.params.emitMakeDeps)
+        {
+            global.params.makeDeps.push(srcfile.toChars());
+        }
 
         return loadSourceBuffer(loc, readResult);
     }
@@ -814,7 +857,7 @@ else
 
             if (buf.length & 3)
             {
-                error("odd length of UTF-32 char source %u", buf.length);
+                error("odd length of UTF-32 char source %llu", cast(ulong) buf.length);
                 fatal();
             }
 
@@ -860,7 +903,7 @@ else
 
             if (buf.length & 1)
             {
-                error("odd length of UTF-16 char source %u", buf.length);
+                error("odd length of UTF-16 char source %llu", cast(ulong) buf.length);
                 fatal();
             }
 
@@ -1165,6 +1208,7 @@ else
             // Add to global array of all modules
             amodules.push(this);
         }
+        Compiler.onParseModule(this);
         return this;
     }
 
@@ -1491,6 +1535,29 @@ else
     }
 
     // Back end
+version (IN_LLVM)
+{
+    //llvm::Module* genLLVMModule(llvm::LLVMContext& context);
+    void checkAndAddOutputFile(const ref FileName file);
+
+    bool llvmForceLogging;
+    bool noModuleInfo; /// Do not emit any module metadata.
+
+    // Coverage analysis
+    void* d_cover_valid;  // llvm::GlobalVariable* --> private immutable size_t[] _d_cover_valid;
+    void* d_cover_data;   // llvm::GlobalVariable* --> private uint[] _d_cover_data;
+    Array!size_t d_cover_valid_init; // initializer for _d_cover_valid
+
+    void initCoverageDataWithCtfeCoverage(uint* data) const
+    {
+        assert(ctfe_cov, "Don't call if there's no CTFE data");
+        foreach (line, count; ctfe_cov)
+            if (line) // 1-based
+                data[line - 1] = count;
+    }
+}
+else
+{
     int doppelganger; // sub-module
     Symbol* cov; // private uint[] __coverage;
     uint* covb; // bit array of valid code line numbers
@@ -1501,21 +1568,9 @@ else
     Symbol* sshareddtor; // module shared destructor
     Symbol* stest; // module unit test
     Symbol* sfilename; // symbol for filename
-
-version (IN_LLVM)
-{
-    //llvm::Module* genLLVMModule(llvm::LLVMContext& context);
-    void checkAndAddOutputFile(const ref FileName file);
-    void makeObjectFilenameUnique();
-
-    bool llvmForceLogging;
-    bool noModuleInfo; /// Do not emit any module metadata.
-
-    // Coverage analysis
-    void* d_cover_valid;  // llvm::GlobalVariable* --> private immutable size_t[] _d_cover_valid;
-    void* d_cover_data;   // llvm::GlobalVariable* --> private uint[] _d_cover_data;
-    Array!size_t d_cover_valid_init; // initializer for _d_cover_valid
 }
+
+    uint[uint] ctfe_cov; /// coverage information from ctfe execution_count[line]
 
     override inout(Module) isModule() inout
     {

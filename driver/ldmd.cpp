@@ -28,7 +28,6 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/Program.h"
 #include "llvm/Support/SystemUtils.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
@@ -37,17 +36,12 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
-#include <numeric>
 #include <vector>
 
 #if _WIN32
 #include <windows.h>
 #else
 #include <sys/stat.h>
-#endif
-
-#ifdef HAVE_SC_ARG_MAX
-#include <unistd.h>
 #endif
 
 namespace ls = llvm::sys;
@@ -109,28 +103,13 @@ bool startsWith(const char *str, const char (&prefix)[N]) {
 /**
  * Runs the given executable, returning its error code.
  */
-int execute(const std::string &exePath, const char **args) {
-#if LDC_LLVM_VER >= 700
-  std::vector<llvm::StringRef> argv;
-  for (auto pArg = args; *pArg; ++pArg) {
-    argv.push_back(*pArg);
-  }
-  auto envVars = llvm::None;
-#else
-  auto argv = args;
-  auto envVars = nullptr;
-#endif
-
+int execute(std::vector<const char *> fullArgs) {
   std::string errorMsg;
-  int rc = ls::ExecuteAndWait(exePath, argv, envVars,
-#if LDC_LLVM_VER >= 600
-                              {},
-#else
-                              nullptr,
-#endif
-                              0, 0, &errorMsg);
-  if (!errorMsg.empty()) {
-    error("Error executing %s: %s", exePath.c_str(), errorMsg.c_str());
+  const char *executable = fullArgs[0];
+  const int rc =
+      args::executeAndWait(std::move(fullArgs), llvm::sys::WEM_UTF8, &errorMsg);
+  if (rc && !errorMsg.empty()) {
+    error("Error executing %s: %s", executable, errorMsg.c_str());
   }
   return rc;
 }
@@ -140,8 +119,7 @@ int execute(const std::string &exePath, const char **args) {
  */
 void printUsage(const char *argv0, const std::string &ldcPath) {
   // Print version information by actually invoking ldc -version.
-  const char *args[] = {ldcPath.c_str(), "-version", nullptr};
-  execute(ldcPath, args);
+  execute({ldcPath.c_str(), "-version"});
 
   printf(
       "\n\
@@ -176,6 +154,7 @@ Where:\n\
                     force colored console output on or off, or only when not redirected (default)\n\
   -conf=<filename>  use config file at filename\n\
   -cov              do code coverage analysis\n\
+  -cov=ctfe         include code executed during CTFE in coverage report\n\
   -cov=<nnn>        require at least nnn%% code coverage\n\
   -D                generate documentation\n\
   -Dd<directory>    write documentation file to directory\n\
@@ -207,7 +186,8 @@ Where:\n\
 "  -H                generate 'header' file\n\
   -Hd=<directory>   write 'header' file to directory\n\
   -Hf=<filename>    write 'header' file to filename\n\
-  -HC               generate C++ 'header' file\n\
+  -HC[=[silent|verbose]]\n\
+                    generate C++ 'header' file\n\
   -HCd=<directory>  write C++ 'header' file to directory\n\
   -HCf=<filename>   write C++ 'header' file to filename\n\
   --help            print help and exit\n\
@@ -225,6 +205,9 @@ Where:\n\
 #endif
 "  -m64              generate 64 bit code\n\
   -main             add default main() (e.g. for unittesting)\n\
+  -makedeps         print module dependencies in Makefile compatible format to stdout\n\
+  -makedeps=<filename>\n\
+                    write module dependencies in Makefile compatible format to filename (only imports)\n\
   -man              open web browser on manual page\n"
 #if 0
 "  -map              generate linker .map file\n"
@@ -242,7 +225,7 @@ Where:\n\
   -od=<directory>   write object & library files to directory\n\
   -of=<filename>    name output file to filename\n\
   -op               preserve source path for output files\n\
-  -preview=<id>     enable an upcoming language change identified by 'id'\n\
+  -preview=<name>   enable an upcoming language change identified by 'name'\n\
   -preview=[h|help|?]\n\
                     list all upcoming language changes\n\
   -profile          profile runtime performance of generated code\n"
@@ -250,12 +233,13 @@ Where:\n\
 "  -profile=gc       profile runtime allocations\n"
 #endif
 "  -release          compile release version\n\
-  -revert=<id>      revert language change identified by 'id'\n\
+  -revert=<name>    revert language change identified by 'name'\n\
   -revert=[h|help|?]\n\
                     list all revertable language changes\n\
   -run <srcfile>    compile, link, and run the program srcfile\n\
   -shared           generate shared library (DLL)\n\
-  -transition=<id>  help with language change identified by 'id'\n\
+  -transition=<name>\n\
+                    help with language change identified by 'name'\n\
   -transition=[h|help|?]\n\
                     list all language changes\n\
   -unittest         compile in unit tests\n\
@@ -271,6 +255,8 @@ Where:\n\
   -version=<level>  compile in version code >= level\n\
   -version=<ident>  compile in version code identified by ident\n\
   -vgc              list all gc allocations including hidden ones\n\
+  -vtemplates=[list-instances]\n\
+                    list statistics on template instantiations\n\
   -vtls             list all variables going into thread local storage\n\
   -w                warnings as errors (compilation will halt)\n\
   -wi               warnings as messages (compilation will continue)\n\
@@ -492,7 +478,11 @@ void translateArgs(const llvm::SmallVectorImpl<const char *> &ldmdArgs,
       else if (strcmp(p + 1, "gf") == 0) {
         ldcArgs.push_back("-g");
       } else if (strcmp(p + 1, "gs") == 0) {
+#if LDC_LLVM_VER >= 1100
+        ldcArgs.push_back("-frame-pointer=all");
+#else
         ldcArgs.push_back("-disable-fp-elim");
+#endif
       } else if (strcmp(p + 1, "gx") == 0) {
         goto Lnot_in_ldc;
       } else if (strcmp(p + 1, "gt") == 0) {
@@ -521,7 +511,8 @@ void translateArgs(const llvm::SmallVectorImpl<const char *> &ldmdArgs,
       else if (strcmp(p + 1, "vtls") == 0) {
         ldcArgs.push_back("-transition=tls");
       }
-      /* -vcolumns
+      /* -vtemplates
+       * -vcolumns
        * -vgc
        */
       else if (startsWith(p + 1, "verrors")) {
@@ -541,8 +532,7 @@ void translateArgs(const llvm::SmallVectorImpl<const char *> &ldmdArgs,
         const char *c = p + 6;
         if (strcmp(c, "?") == 0 || strcmp(c, "h") == 0 ||
             strcmp(c, "help") == 0) {
-          const char *mcpuargs[] = {ldcPath.c_str(), "-mcpu=help", nullptr};
-          execute(ldcPath, mcpuargs);
+          execute({ldcPath.c_str(), "-mcpu=help"});
           exit(EXIT_SUCCESS);
         } else if (strcmp(c, "baseline") == 0) {
           // ignore
@@ -670,8 +660,7 @@ void translateArgs(const llvm::SmallVectorImpl<const char *> &ldmdArgs,
         exit(EXIT_SUCCESS);
       } else if (strcmp(p + 1, "-version") == 0) {
         // Print version information by actually invoking ldc -version.
-        const char *versionargs[] = {ldcPath.c_str(), "-version", nullptr};
-        execute(ldcPath, versionargs);
+        execute({ldcPath.c_str(), "-version"});
         exit(EXIT_SUCCESS);
       }
       /* -L
@@ -723,23 +712,6 @@ void translateArgs(const llvm::SmallVectorImpl<const char *> &ldmdArgs,
     }
     puts("");
   }
-}
-
-/**
- * Returns the OS-dependent length limit for the command line when invoking
- * subprocesses.
- */
-size_t maxCommandLineLen() {
-#if defined(HAVE_SC_ARG_MAX)
-  // http://www.in-ulm.de/~mascheck/various/argmax – the factor 2 is just
-  // a wild guess to account for the enviroment.
-  return sysconf(_SC_ARG_MAX) / 2;
-#elif defined(_WIN32)
-  // http://blogs.msdn.com/b/oldnewthing/archive/2003/12/10/56028.aspx
-  return 32767;
-#else
-#error "Do not know how to determine maximum command line length."
-#endif
 }
 
 /**
@@ -797,49 +769,10 @@ int cppmain() {
     exit(EXIT_FAILURE);
   }
 
-  // We need to manually set up argv[0] and the terminating NULL.
-  std::vector<const char *> args;
-  args.push_back(ldcPath.c_str());
+  std::vector<const char *> fullArgs;
+  fullArgs.push_back(ldcPath.c_str());
 
-  translateArgs(ldmdArguments, args);
+  translateArgs(ldmdArguments, fullArgs);
 
-  args.push_back(nullptr);
-
-  // Check if we can get away without a response file.
-  const size_t totalLen = std::accumulate(
-      args.begin(), args.end() - 1,
-      args.size() * 3, // quotes + space
-      [](size_t acc, const char *arg) { return acc + strlen(arg); });
-  if (totalLen <= maxCommandLineLen()) {
-    return execute(ldcPath, args.data());
-  }
-
-  int rspFd;
-  llvm::SmallString<128> rspPath;
-  if (ls::fs::createUniqueFile("ldmd-%%-%%-%%-%%.rsp", rspFd, rspPath)) {
-    error("Could not open temporary response file.");
-  }
-
-  {
-    llvm::raw_fd_ostream rspOut(rspFd, /*shouldClose=*/true);
-    // skip argv[0] and terminating NULL
-    for (auto it = args.begin() + 1, end = args.end() - 1; it != end; ++it) {
-      rspOut << *it << '\n';
-    }
-  }
-
-  std::string rspArg = "@";
-  rspArg += rspPath.str();
-
-  args.resize(1);
-  args.push_back(rspArg.c_str());
-  args.push_back(nullptr);
-
-  int rc = execute(ldcPath, args.data());
-
-  if (ls::fs::remove(rspPath.str())) {
-    warning("Could not remove response file.");
-  }
-
-  return rc;
+  return execute(std::move(fullArgs));
 }

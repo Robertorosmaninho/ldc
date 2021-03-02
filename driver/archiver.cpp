@@ -10,6 +10,7 @@
 #include "dmd/errors.h"
 #include "dmd/globals.h"
 #include "driver/cl_options.h"
+#include "driver/timetrace.h"
 #include "driver/tool.h"
 #include "gen/logger.h"
 #include "llvm/ADT/Triple.h"
@@ -18,15 +19,13 @@
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Errc.h"
+#if LDC_LLVM_VER >= 1100
+#include "llvm/Support/Host.h"
+#endif
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
-#include <cstring>
-
-#if LDC_LLVM_VER >= 500
 #include "llvm/ToolDrivers/llvm-lib/LibDriver.h"
-#else
-#include "llvm/LibDriver/LibDriver.h"
-#endif
+#include <cstring>
 
 using namespace llvm;
 
@@ -70,10 +69,8 @@ int addMember(std::vector<NewArchiveMember> &Members, StringRef FileName,
       NewArchiveMember::getFile(FileName, Deterministic);
   failIfError(NMOrErr.takeError(), FileName);
 
-#if LDC_LLVM_VER >= 500
   // Use the basename of the object path for the member name.
   NMOrErr->MemberName = sys::path::filename(NMOrErr->MemberName);
-#endif
 
   if (Pos == -1)
     Members.push_back(std::move(*NMOrErr));
@@ -106,11 +103,7 @@ int computeNewArchiveMembers(object::Archive *OldArchive,
     Error Err = Error::success();
     for (auto &Child : OldArchive->children(Err)) {
       auto NameOrErr = Child.getName();
-#if LDC_LLVM_VER < 400
-      failIfError(NameOrErr.getError(), "");
-#else
       failIfError(NameOrErr.takeError(), "");
-#endif
       StringRef Name = NameOrErr.get();
 
       auto MemberI = find_if(Members, [Name](StringRef Path) {
@@ -146,11 +139,7 @@ int computeNewArchiveMembers(object::Archive *OldArchive,
 
 object::Archive::Kind getDefaultForHost() {
   return Triple(sys::getProcessTriple()).isOSDarwin()
-#if LDC_LLVM_VER >= 500
              ? object::Archive::K_DARWIN
-#else
-             ? object::Archive::K_BSD
-#endif
              : object::Archive::K_GNU;
 }
 
@@ -160,11 +149,7 @@ object::Archive::Kind getKindFromMember(const NewArchiveMember &Member) {
 
   if (OptionalObject) {
     return isa<object::MachOObjectFile>(**OptionalObject)
-#if LDC_LLVM_VER >= 500
                ? object::Archive::K_DARWIN
-#else
-               ? object::Archive::K_BSD
-#endif
                : object::Archive::K_GNU;
   }
 
@@ -191,11 +176,7 @@ int performWriteOperation(object::Archive *OldArchive,
       writeArchive(ArchiveName, NewMembers, Symtab, Kind, Deterministic, Thin,
                    std::move(OldArchiveBuf));
 
-#if LDC_LLVM_VER >= 600
   failIfError(std::move(Result), ("error writing '" + ArchiveName + "'").str());
-#else
-  failIfError(Result.second, ("error writing '" + ArchiveName + "'").str());
-#endif
 
   return 0;
 }
@@ -251,6 +232,34 @@ int internalLib(ArrayRef<const char *> args) {
   return libDriverMain(args);
 }
 
+std::string getOutputPath() {
+  std::string libName;
+
+  if (global.params.libname.length) { // explicit
+    // DMD adds the default extension if there is none
+    libName = opts::invokedByLDMD
+                  ? FileName::defaultExt(global.params.libname.ptr,
+                                         global.lib_ext.ptr)
+                  : global.params.libname.ptr;
+  } else { // infer from first object file
+    libName =
+        global.params.objfiles.length
+            ? FileName::removeExt(FileName::name(global.params.objfiles[0]))
+            : "a.out";
+    libName += '.';
+    libName += global.lib_ext.ptr;
+  }
+
+  // DMD creates static libraries in the objects directory (unless using an
+  // absolute output path via `-of`).
+  if (opts::invokedByLDMD && global.params.objdir.length &&
+      !FileName::absolute(libName.c_str())) {
+    libName = FileName::combine(global.params.objdir.ptr, libName.c_str());
+  }
+
+  return libName;
+}
+
 } // anonymous namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -258,8 +267,12 @@ int internalLib(ArrayRef<const char *> args) {
 static llvm::cl::opt<std::string> ar("ar", llvm::cl::desc("Archiver"),
                                      llvm::cl::Hidden, llvm::cl::ZeroOrMore);
 
+// path to the produced static library
+static std::string gStaticLibPath;
+
 int createStaticLibrary() {
   Logger::println("*** Creating static library ***");
+  ::TimeTraceScope timeScope("Create static library");
 
   const bool isTargetMSVC =
       global.params.targetTriple->isWindowsMSVCEnvironment();
@@ -283,6 +296,11 @@ int createStaticLibrary() {
     tool = getProgram(isTargetMSVC ? "lib.exe" : "ar", &ar);
   }
 
+  // remember output path for later
+  gStaticLibPath = getOutputPath();
+
+  createDirectoryForFileOrFail(gStaticLibPath);
+
   // build arguments
   std::vector<std::string> args;
 
@@ -296,34 +314,10 @@ int createStaticLibrary() {
     args.push_back("/NOLOGO");
   }
 
-  // output filename
-  std::string libName;
-  if (global.params.libname.length) { // explicit
-    // DMD adds the default extension if there is none
-    libName = opts::invokedByLDMD
-                  ? FileName::defaultExt(global.params.libname.ptr,
-                                         global.lib_ext.ptr)
-                  : global.params.libname.ptr;
-  } else { // infer from first object file
-    libName =
-        global.params.objfiles.length
-            ? FileName::removeExt(FileName::name(global.params.objfiles[0]))
-            : "a.out";
-    libName += '.';
-    libName += global.lib_ext.ptr;
-  }
-
-  // DMD creates static libraries in the objects directory (unless using an
-  // absolute output path via `-of`).
-  if (opts::invokedByLDMD && global.params.objdir.length &&
-      !FileName::absolute(libName.c_str())) {
-    libName = FileName::combine(global.params.objdir.ptr, libName.c_str());
-  }
-
   if (isTargetMSVC) {
-    args.push_back("/OUT:" + libName);
+    args.push_back("/OUT:" + gStaticLibPath);
   } else {
-    args.push_back(libName);
+    args.push_back(gStaticLibPath);
   }
 
   // object files
@@ -344,9 +338,6 @@ int createStaticLibrary() {
       args.push_back(std::string("/DEF:") + global.params.deffile.ptr);
   }
 
-  // create path to the library
-  createDirectoryForFileOrFail(libName);
-
   if (useInternalArchiver) {
     const auto fullArgs =
         getFullArgs(tool.c_str(), args, global.params.verbose);
@@ -361,4 +352,9 @@ int createStaticLibrary() {
 
   // invoke external archiver
   return executeToolAndWait(tool, args, global.params.verbose);
+}
+
+const char *getPathToProducedStaticLibrary() {
+  assert(!gStaticLibPath.empty());
+  return gStaticLibPath.c_str();
 }

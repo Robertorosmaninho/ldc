@@ -72,10 +72,13 @@ bool isInlineCandidate(FuncDeclaration &fdecl) {
 
 } // end anonymous namespace
 
-bool alreadyOrWillBeDefined(FuncDeclaration &fdecl) {
+bool skipCodegen(FuncDeclaration &fdecl) {
+  if (fdecl.isFuncLiteralDeclaration()) // emitted into each referencing CU
+    return false;
+
   for (FuncDeclaration *f = &fdecl; f;) {
-    if (!f->isInstantiated() && f->inNonRoot()) {
-      return false;
+    if (f->inNonRoot()) { // false if instantiated
+      return true;
     }
     if (f->isNested()) {
       f = f->toParent2()->isFuncDeclaration();
@@ -83,7 +86,7 @@ bool alreadyOrWillBeDefined(FuncDeclaration &fdecl) {
       break;
     }
   }
-  return true;
+  return false;
 }
 
 bool defineAsExternallyAvailable(FuncDeclaration &fdecl) {
@@ -92,13 +95,13 @@ bool defineAsExternallyAvailable(FuncDeclaration &fdecl) {
 
   // Implementation note: try to do cheap checks first.
 
-  if (fdecl.neverInline || fdecl.inlining == PINLINEnever) {
+  if (fdecl.neverInline || fdecl.inlining == PINLINE::never) {
     IF_LOG Logger::println("pragma(inline, false) specified");
     return false;
   }
 
   // pragma(inline, true) functions will be inlined even at -O0
-  if (fdecl.inlining == PINLINEalways) {
+  if (fdecl.inlining == PINLINE::always) {
     IF_LOG Logger::println(
         "pragma(inline, true) specified, overrides cmdline flags");
   } else if (!willCrossModuleInline()) {
@@ -106,6 +109,11 @@ bool defineAsExternallyAvailable(FuncDeclaration &fdecl) {
     return false;
   }
 
+  if (fdecl.isFuncLiteralDeclaration()) {
+    // defined as discardable linkonce_odr in each referencing CU
+    IF_LOG Logger::println("isFuncLiteralDeclaration() == true");
+    return false;
+  }
   if (fdecl.isUnitTestDeclaration()) {
     IF_LOG Logger::println("isUnitTestDeclaration() == true");
     return false;
@@ -143,7 +151,7 @@ bool defineAsExternallyAvailable(FuncDeclaration &fdecl) {
     return false;
   }
 
-  if (fdecl.inlining != PINLINEalways && !isInlineCandidate(fdecl))
+  if (fdecl.inlining != PINLINE::always && !isInlineCandidate(fdecl))
     return false;
 
   IF_LOG Logger::println("Potential inlining candidate");

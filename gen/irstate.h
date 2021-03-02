@@ -22,7 +22,6 @@
 #include "ir/irvar.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/ProfileData/InstrProfReader.h"
 #include <deque>
 #include <memory>
@@ -59,6 +58,7 @@ class StructLiteralExp;
 struct IrFunction;
 struct IrModule;
 
+<<<<<<< HEAD
 // represents a scope
 struct IRScope {
   llvm::BasicBlock *begin;
@@ -67,8 +67,17 @@ struct IRScope {
   IRScope();
   IRScope(const IRScope &);
   explicit IRScope(llvm::BasicBlock *b);
+=======
+// Saves the IRBuilder state and restores it on destruction.
+struct IRBuilderScope {
+private:
+  llvm::IRBuilderBase::InsertPointGuard ipGuard;
+  llvm::IRBuilderBase::FastMathFlagGuard fmfGuard;
+>>>>>>> v1.25.1
 
-  IRScope &operator=(const IRScope &rhs);
+public:
+  explicit IRBuilderScope(llvm::IRBuilderBase &builder)
+      : ipGuard(builder), fmfGuard(builder) {}
 };
 
 struct IRBuilderHelper {
@@ -111,6 +120,9 @@ struct IRAsmBlock {
 // represents the LLVM module (object file)
 struct IRState {
 private:
+  IRBuilder<> builder;
+  friend struct IRBuilderHelper;
+
   std::vector<std::pair<llvm::GlobalVariable *, llvm::Constant *>>
       globalsToReplace;
   Array<Loc> inlineAsmLocs; // tracked by GC
@@ -121,6 +133,13 @@ private:
   // [The real key type is `StructLiteralExp *`; a fwd class declaration isn't
   // enough to use it directly.]
   llvm::DenseMap<void *, llvm::Constant *> structLiteralConstants;
+
+  // Global variables bound to string literals. Once created such a variable
+  // is reused whenever an equivalent string literal is referenced in the
+  // module, to prevent duplicates.
+  llvm::StringMap<llvm::GlobalVariable *> cachedStringLiterals;
+  llvm::StringMap<llvm::GlobalVariable *> cachedWstringLiterals;
+  llvm::StringMap<llvm::GlobalVariable *> cachedDstringLiterals;
 
 public:
   IRState(const char *name, llvm::LLVMContext &context);
@@ -147,10 +166,16 @@ public:
   llvm::Function *topfunc();
   llvm::Instruction *topallocapoint();
 
-  // basic block scopes
-  std::vector<IRScope> scopes;
-  IRScope &scope();
-  llvm::BasicBlock *scopebb();
+  // Use this to set the IRBuilder's insertion point for a new function.
+  // The previous IRBuilder state is restored when the returned value is
+  // destructed. Use `ir->SetInsertPoint()` instead to change the insertion
+  // point inside the same function.
+  std::unique_ptr<IRBuilderScope> setInsertPoint(llvm::BasicBlock *bb);
+  // Use this to have the IRBuilder's current insertion point (incl. debug
+  // location) restored when the returned value is destructed.
+  std::unique_ptr<llvm::IRBuilderBase::InsertPointGuard> saveInsertPoint();
+  // Returns the basic block the IRBuilder currently inserts into.
+  llvm::BasicBlock *scopebb() { return ir->GetInsertBlock(); }
   bool scopereturned();
 
   // Creates a new basic block and inserts it before the specified one.
@@ -164,21 +189,22 @@ public:
   llvm::BasicBlock *insertBB(const llvm::Twine &name);
 
   // create a call or invoke, depending on the landing pad info
-  llvm::CallSite CreateCallOrInvoke(LLValue *Callee, const char *Name = "");
-  llvm::CallSite CreateCallOrInvoke(LLValue *Callee,
-                                    llvm::ArrayRef<LLValue *> Args,
-                                    const char *Name = "",
-                                    bool isNothrow = false);
-  llvm::CallSite CreateCallOrInvoke(LLValue *Callee, LLValue *Arg1,
-                                    const char *Name = "");
-  llvm::CallSite CreateCallOrInvoke(LLValue *Callee, LLValue *Arg1,
-                                    LLValue *Arg2, const char *Name = "");
-  llvm::CallSite CreateCallOrInvoke(LLValue *Callee, LLValue *Arg1,
-                                    LLValue *Arg2, LLValue *Arg3,
-                                    const char *Name = "");
-  llvm::CallSite CreateCallOrInvoke(LLValue *Callee, LLValue *Arg1,
-                                    LLValue *Arg2, LLValue *Arg3, LLValue *Arg4,
-                                    const char *Name = "");
+  llvm::Instruction *CreateCallOrInvoke(LLFunction *Callee,
+                                        const char *Name = "");
+  llvm::Instruction *CreateCallOrInvoke(LLFunction *Callee,
+                                        llvm::ArrayRef<LLValue *> Args,
+                                        const char *Name = "",
+                                        bool isNothrow = false);
+  llvm::Instruction *CreateCallOrInvoke(LLFunction *Callee, LLValue *Arg1,
+                                        const char *Name = "");
+  llvm::Instruction *CreateCallOrInvoke(LLFunction *Callee, LLValue *Arg1,
+                                        LLValue *Arg2, const char *Name = "");
+  llvm::Instruction *CreateCallOrInvoke(LLFunction *Callee, LLValue *Arg1,
+                                        LLValue *Arg2, LLValue *Arg3,
+                                        const char *Name = "");
+  llvm::Instruction *CreateCallOrInvoke(LLFunction *Callee, LLValue *Arg1,
+                                        LLValue *Arg2, LLValue *Arg3,
+                                        LLValue *Arg4, const char *Name = "");
 
   // this holds the array being indexed or sliced so $ will work
   // might be a better way but it works. problem is I only get a
@@ -207,14 +233,6 @@ public:
   /// Whether to emit array bounds checking in the current function.
   bool emitArrayBoundsChecks();
 
-  // Global variables bound to string literals.  Once created such a
-  // variable is reused whenever the same string literal is
-  // referenced in the module.  Caching them per module prevents the
-  // duplication of identical literals.
-  llvm::StringMap<llvm::GlobalVariable *> stringLiteral1ByteCache;
-  llvm::StringMap<llvm::GlobalVariable *> stringLiteral2ByteCache;
-  llvm::StringMap<llvm::GlobalVariable *> stringLiteral4ByteCache;
-
   // Sets the initializer for a global LL variable.
   // If the types don't match, this entails creating a new helper global
   // matching the initializer type and replacing all existing uses of globalVar
@@ -222,8 +240,10 @@ public:
   // Returns either the specified globalVar if the types match, or the bitcast
   // pointer replacing globalVar (and resets globalVar to the new helper
   // global).
-  llvm::Constant *setGlobalVarInitializer(llvm::GlobalVariable *&globalVar,
-                                          llvm::Constant *initializer);
+  llvm::Constant *
+  setGlobalVarInitializer(llvm::GlobalVariable *&globalVar,
+                          llvm::Constant *initializer,
+                          Dsymbol *symbolForLinkageAndVisibility);
 
   // To be called when finalizing the IR module in order to perform a second
   // replacement pass for global variables replaced (and registered) by
@@ -233,6 +253,12 @@ public:
   llvm::Constant *getStructLiteralConstant(StructLiteralExp *sle) const;
   void setStructLiteralConstant(StructLiteralExp *sle,
                                 llvm::Constant *constant);
+
+  // Constructs a global variable for a StringExp.
+  // Caches the result based on StringExp::peekData() such that any subsequent
+  // calls with a StringExp with matching data will return the same variable.
+  llvm::GlobalVariable *getCachedStringLiteral(StringExp *se);
+  llvm::GlobalVariable *getCachedStringLiteral(llvm::StringRef s);
 
   // List of functions with cpu or features attributes overriden by user
   std::vector<IrFunction *> targetCpuOrFeaturesOverridden;
@@ -246,13 +272,8 @@ public:
   std::set<IrGlobal *> dynamicCompiledVars;
 
 /// Vector of options passed to the linker as metadata in object file.
-#if LDC_LLVM_VER >= 500
   llvm::SmallVector<llvm::MDNode *, 5> linkerOptions;
   llvm::SmallVector<llvm::MDNode *, 5> linkerDependentLibs;
-#else
-  llvm::SmallVector<llvm::Metadata *, 5> linkerOptions;
-  llvm::SmallVector<llvm::Metadata *, 5> linkerDependentLibs;
-#endif
 
   void addLinkerOption(llvm::ArrayRef<llvm::StringRef> options);
   void addLinkerDependentLib(llvm::StringRef libraryName);
@@ -262,7 +283,7 @@ public:
 
   // MS C++ compatible type descriptors
   llvm::DenseMap<size_t, llvm::StructType *> TypeDescriptorTypeMap;
-  llvm::DenseMap<llvm::Constant *, llvm::GlobalVariable *> TypeDescriptorMap;
+  llvm::DenseMap<ClassDeclaration *, llvm::GlobalVariable *> TypeDescriptorMap;
 
   // Target for dcompute. If not nullptr, it owns this.
   DComputeTarget *dcomputetarget = nullptr;

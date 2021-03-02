@@ -77,8 +77,18 @@ enum LOG = false;
  */
 extern(C++) void semantic3(Dsymbol dsym, Scope* sc)
 {
+version (IN_LLVM)
+{
+    import driver.timetrace_sema;
+    scope v = new Semantic3Visitor(sc);
+    scope vtimetrace = new SemanticTimeTraceVisitor!Semantic3Visitor(v);
+    dsym.accept(vtimetrace);
+}
+else
+{
     scope v = new Semantic3Visitor(sc);
     dsym.accept(v);
+}
 }
 
 private extern(C++) final class Semantic3Visitor : Visitor
@@ -206,6 +216,7 @@ private extern(C++) final class Semantic3Visitor : Visitor
 
     override void visit(FuncDeclaration funcdecl)
     {
+        //printf("FuncDeclaration::semantic3(%s '%s', sc = %p)\n", funcdecl.kind(), funcdecl.toChars(), sc);
         /* Determine if function should add `return 0;`
          */
         bool addReturn0()
@@ -414,17 +425,15 @@ private extern(C++) final class Semantic3Visitor : Visitor
             /* Declare all the function parameters as variables
              * and install them in parameters[]
              */
-            size_t nparams = f.parameterList.length;
-            if (nparams)
+            if (const nparams = f.parameterList.length)
             {
                 /* parameters[] has all the tuples removed, as the back end
                  * doesn't know about tuples
                  */
                 funcdecl.parameters = new VarDeclarations();
                 funcdecl.parameters.reserve(nparams);
-                for (size_t i = 0; i < nparams; i++)
+                foreach (i, fparam; f.parameterList)
                 {
-                    Parameter fparam = f.parameterList[i];
                     Identifier id = fparam.ident;
                     StorageClass stc = 0;
                     if (!id)
@@ -455,7 +464,7 @@ private extern(C++) final class Semantic3Visitor : Visitor
                     if ((funcdecl.flags & FUNCFLAG.inferScope) && !(fparam.storageClass & STC.scope_))
                         stc |= STC.maybescope;
 
-                    stc |= fparam.storageClass & (STC.in_ | STC.out_ | STC.ref_ | STC.return_ | STC.scope_ | STC.lazy_ | STC.final_ | STC.TYPECTOR | STC.nodtor);
+                    stc |= fparam.storageClass & (STC.IOR | STC.return_ | STC.scope_ | STC.lazy_ | STC.final_ | STC.TYPECTOR | STC.nodtor);
                     v.storage_class = stc;
                     v.dsymbolSemantic(sc2);
                     if (!sc2.insert(v))
@@ -508,7 +517,7 @@ private extern(C++) final class Semantic3Visitor : Visitor
             Statement fpreinv = null;
             if (funcdecl.addPreInvariant())
             {
-                Expression e = addInvariant(funcdecl.loc, sc, funcdecl.isThis(), funcdecl.vthis);
+                Expression e = addInvariant(funcdecl.isThis(), funcdecl.vthis);
                 if (e)
                     fpreinv = new ExpStatement(Loc.initial, e);
             }
@@ -517,7 +526,7 @@ private extern(C++) final class Semantic3Visitor : Visitor
             Statement fpostinv = null;
             if (funcdecl.addPostInvariant())
             {
-                Expression e = addInvariant(funcdecl.loc, sc, funcdecl.isThis(), funcdecl.vthis);
+                Expression e = addInvariant(funcdecl.isThis(), funcdecl.vthis);
                 if (e)
                     fpostinv = new ExpStatement(Loc.initial, e);
             }
@@ -568,9 +577,6 @@ private extern(C++) final class Semantic3Visitor : Visitor
                         v.ctorinit = 0;
                     }
                 }
-
-                if (!funcdecl.inferRetType && !target.isReturnOnStack(f, funcdecl.needThis()))
-                    funcdecl.nrvo_can = 0;
 
                 bool inferRef = (f.isref && (funcdecl.storage_class & STC.auto_));
 
@@ -625,7 +631,7 @@ private extern(C++) final class Semantic3Visitor : Visitor
                 }
 
                 // handle NRVO
-                if (!target.isReturnOnStack(f, funcdecl.needThis()) || funcdecl.checkNrvo())
+                if (!target.isReturnOnStack(f, funcdecl.needThis()) || !funcdecl.checkNRVO())
                     funcdecl.nrvo_can = 0;
 
                 if (funcdecl.fbody.isErrorStatement())
@@ -734,7 +740,7 @@ private extern(C++) final class Semantic3Visitor : Visitor
                     /* Disable optimization on Win32 due to
                      * https://issues.dlang.org/show_bug.cgi?id=17997
                      */
-//                    if (!global.params.isWindows || global.params.is64bit)
+//                    if (!global.params.targetOS == TargetOS.Windows || global.params.is64bit)
                         funcdecl.eh_none = true;         // don't generate unwind tables for this function
                 }
 
@@ -883,13 +889,20 @@ private extern(C++) final class Semantic3Visitor : Visitor
                         const hasCopyCtor = exp.type.ty == Tstruct && (cast(TypeStruct)exp.type).sym.hasCopyCtor;
                         // if a copy constructor is present, the return type conversion will be handled by it
                         if (!(hasCopyCtor && exp.isLvalue()))
-                            exp = exp.implicitCastTo(sc2, tret);
+                        {
+                            if (f.isref && !MODimplicitConv(exp.type.mod, tret.mod) && !tret.isTypeSArray())
+                                error(exp.loc, "expression `%s` of type `%s` is not implicitly convertible to return type `ref %s`",
+                                      exp.toChars(), exp.type.toChars(), tret.toChars());
+                            else
+                                exp = exp.implicitCastTo(sc2, tret);
+                        }
 
                         if (f.isref)
                         {
                             // Function returns a reference
                             exp = exp.toLvalue(sc2, exp);
                             checkReturnEscapeRef(sc2, exp, false);
+                            exp = exp.optimize(WANTvalue, /*keepLvalue*/ true);
                         }
                         else
                         {
@@ -934,7 +947,15 @@ private extern(C++) final class Semantic3Visitor : Visitor
                 sc2 = sc2.pop();
             }
 
-            funcdecl.frequire = funcdecl.mergeFrequire(funcdecl.frequire, funcdecl.fdrequireParams);
+            if (global.params.inclusiveInContracts)
+            {
+                funcdecl.frequire = funcdecl.mergeFrequireInclusivePreview(
+                    funcdecl.frequire, funcdecl.fdrequireParams);
+            }
+            else
+            {
+                funcdecl.frequire = funcdecl.mergeFrequire(funcdecl.frequire, funcdecl.fdrequireParams);
+            }
             funcdecl.fensure = funcdecl.mergeFensure(funcdecl.fensure, Id.result, funcdecl.fdensureParams);
 
             Statement freq = funcdecl.frequire;
@@ -1160,7 +1181,7 @@ else
                     ClassDeclaration cd = funcdecl.toParentDecl().isClassDeclaration();
                     if (cd)
                     {
-                        if (!IN_LLVM && !global.params.is64bit && global.params.isWindows && !funcdecl.isStatic() && !sbody.usesEH() && !global.params.trace)
+                        if (!IN_LLVM && !global.params.is64bit && global.params.targetOS == TargetOS.Windows && !funcdecl.isStatic() && !sbody.usesEH() && !global.params.trace)
                         {
                             /* The back end uses the "jmonitor" hack for syncing;
                              * no need to do the sync at this level.
@@ -1309,14 +1330,13 @@ else
         // Infer STC.scope_
         if (funcdecl.parameters && !funcdecl.errors)
         {
-            size_t nfparams = f.parameterList.length;
-            assert(nfparams == funcdecl.parameters.dim);
-            foreach (u, v; *funcdecl.parameters)
+            assert(f.parameterList.length == funcdecl.parameters.dim);
+            foreach (u, p; f.parameterList)
             {
+                auto v = (*funcdecl.parameters)[u];
                 if (v.storage_class & STC.maybescope)
                 {
                     //printf("Inferring scope for %s\n", v.toChars());
-                    Parameter p = f.parameterList[u];
                     notMaybeScope(v);
                     v.storage_class |= STC.scope_ | STC.scopeinferred;
                     p.storageClass |= STC.scope_ | STC.scopeinferred;
@@ -1329,7 +1349,7 @@ else
         {
             notMaybeScope(funcdecl.vthis);
             funcdecl.vthis.storage_class |= STC.scope_ | STC.scopeinferred;
-            f.isscope = true;
+            f.isScopeQual = true;
             f.isscopeinferred = true;
         }
 
@@ -1376,13 +1396,15 @@ else
 
         /* If any of the fields of the aggregate have a destructor, add
          *   scope (failure) { this.fieldDtor(); }
-         * as the first statement. It is not necessary to add it after
+         * as the first statement of the constructor (unless the constructor
+         * doesn't define a body - @disable, extern)
+         *.It is not necessary to add it after
          * each initialization of a field, because destruction of .init constructed
          * structs should be benign.
          * https://issues.dlang.org/show_bug.cgi?id=14246
          */
         AggregateDeclaration ad = ctor.isMemberDecl();
-        if (ad && ad.fieldDtor && global.params.dtorFields)
+        if (ctor.fbody && ad && ad.fieldDtor && global.params.dtorFields && !ctor.type.toTypeFunction.isnothrow)
         {
             /* Generate:
              *   this.fieldDtor()

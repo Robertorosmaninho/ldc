@@ -18,9 +18,7 @@ import dmd.apply;
 import dmd.arraytypes;
 import dmd.attrib;
 import dmd.declaration;
-import dmd.dstruct;
 import dmd.dsymbol;
-import dmd.dtemplate;
 import dmd.expression;
 import dmd.func;
 import dmd.globals;
@@ -60,6 +58,8 @@ extern (C++) bool canThrow(Expression e, FuncDeclaration func, bool mustNotThrow
                 {
                     e.error("%s `%s` is not `nothrow`",
                         f.kind(), f.toPrettyChars());
+
+                    e.checkOverridenDtor(null, f, dd => dd.type.toTypeFunction().isnothrow, "not nothrow");
                 }
                 stop = true;  // if any function throws, then the whole expression throws
             }
@@ -76,6 +76,9 @@ extern (C++) bool canThrow(Expression e, FuncDeclaration func, bool mustNotThrow
 
         override void visit(CallExp ce)
         {
+            if (ce.inDebugStatement)
+                return;
+
             if (global.errors && !ce.e1.type)
                 return; // error recovery
             /* If calling a function or delegate that is typed as nothrow,

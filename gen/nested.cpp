@@ -29,7 +29,7 @@ static unsigned getVthisIdx(AggregateDeclaration *ad) {
 
 static void DtoCreateNestedContextType(FuncDeclaration *fd);
 
-DValue *DtoNestedVariable(Loc &loc, Type *astype, VarDeclaration *vd,
+DValue *DtoNestedVariable(const Loc &loc, Type *astype, VarDeclaration *vd,
                           bool byref) {
   IF_LOG Logger::println("DtoNestedVariable for %s @ %s", vd->toChars(),
                          loc.toChars());
@@ -66,16 +66,16 @@ DValue *DtoNestedVariable(Loc &loc, Type *astype, VarDeclaration *vd,
   if (currentCtx) {
     Logger::println("Using own nested context of current function");
     ctx = currentCtx;
-  } else if (irfunc->decl->isMember2()) {
+  } else if (AggregateDeclaration *ad = irfunc->decl->isMember2()) {
     Logger::println(
         "Current function is member of nested class, loading vthis");
-
-    AggregateDeclaration *cd = irfunc->decl->isMember2();
-    LLValue *val = irfunc->thisArg;
-    if (cd->isClassDeclaration()) {
-      val = DtoLoad(val);
+    LLValue *val =
+        ad->isClassDeclaration() ? DtoLoad(irfunc->thisArg) : irfunc->thisArg;
+    for (; ad; ad = ad->toParent2()->isAggregateDeclaration()) {
+      assert(ad->vthis);
+      val = DtoLoad(DtoGEP(val, 0, getVthisIdx(ad), ".vthis"));
     }
-    ctx = DtoLoad(DtoGEP(val, 0, getVthisIdx(cd), ".vthis"));
+    ctx = val;
     skipDIDeclaration = true;
   } else {
     Logger::println("Regular nested function, using context arg");
@@ -171,9 +171,6 @@ DValue *DtoNestedVariable(Loc &loc, Type *astype, VarDeclaration *vd,
   }
 
   if (!skipDIDeclaration && global.params.symdebug) {
-#if LDC_LLVM_VER < 500
-    gIR->DBuilder.OpDeref(dwarfAddrOps);
-#endif
     gIR->DBuilder.EmitLocalVariable(ctx, vd, nullptr, false,
                                     /*forceAsLocal=*/true, false, dwarfAddrOps);
   }
@@ -181,7 +178,7 @@ DValue *DtoNestedVariable(Loc &loc, Type *astype, VarDeclaration *vd,
   return makeVarDValue(astype, vd, val);
 }
 
-void DtoResolveNestedContext(Loc &loc, AggregateDeclaration *decl,
+void DtoResolveNestedContext(const Loc &loc, AggregateDeclaration *decl,
                              LLValue *value) {
   IF_LOG Logger::println("Resolving nested context");
   LOG_SCOPE;
@@ -205,7 +202,7 @@ void DtoResolveNestedContext(Loc &loc, AggregateDeclaration *decl,
   }
 }
 
-LLValue *DtoNestedContext(Loc &loc, Dsymbol *sym) {
+LLValue *DtoNestedContext(const Loc &loc, Dsymbol *sym) {
   IF_LOG Logger::println("DtoNestedContext for %s", sym->toPrettyChars());
   LOG_SCOPE;
 
@@ -404,7 +401,7 @@ static void DtoCreateNestedContextType(FuncDeclaration *fd) {
       t = DtoType(vd->type->pointerTo());
     } else if (isParam && (vd->storage_class & STClazy)) {
       // the type is a delegate (LL struct)
-      Type *dt = TypeFunction::create(nullptr, vd->type, VARARGnone, LINKd);
+      Type *dt = TypeFunction::create(nullptr, vd->type, VARARGnone, LINK::d);
       dt = createTypeDelegate(dt);
       t = DtoType(dt);
     } else {
@@ -458,17 +455,13 @@ void DtoCreateNestedContext(FuncGenState &funcGen) {
       LLValue *src = irFunc.nestArg;
       if (!src) {
         assert(irFunc.thisArg);
-        assert(fd->isMember2());
-        LLValue *thisval = DtoLoad(irFunc.thisArg);
-        AggregateDeclaration *cd = fd->isMember2();
-        assert(cd);
-        assert(cd->vthis);
+        AggregateDeclaration *ad = fd->isMember2();
+        assert(ad);
+        assert(ad->vthis);
+        LLValue *thisptr =
+            ad->isClassDeclaration() ? DtoLoad(irFunc.thisArg) : irFunc.thisArg;
         IF_LOG Logger::println("Indexing to 'this'");
-        if (cd->isStructDeclaration()) {
-          src = DtoExtractValue(thisval, getVthisIdx(cd), ".vthis");
-        } else {
-          src = DtoLoad(DtoGEP(thisval, 0, getVthisIdx(cd), ".vthis"));
-        }
+        src = DtoLoad(DtoGEP(thisptr, 0, getVthisIdx(ad), ".vthis"));
       }
       if (depth > 1) {
         src = DtoBitCast(src, getVoidPtrType());
@@ -524,11 +517,6 @@ void DtoCreateNestedContext(FuncGenState &funcGen) {
 
       if (global.params.symdebug) {
         LLSmallVector<int64_t, 1> dwarfAddrOps;
-#if LDC_LLVM_VER < 500
-        // Because we are passing a GEP instead of an alloca to
-        // llvm.dbg.declare, we have to make the address dereference explicit.
-        gIR->DBuilder.OpDeref(dwarfAddrOps);
-#endif
         gIR->DBuilder.EmitLocalVariable(gep, vd, nullptr, false, false, false,
                                         dwarfAddrOps);
       }

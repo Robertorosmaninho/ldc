@@ -27,6 +27,7 @@ import dmd.declaration;
 import dmd.denum;
 import dmd.dimport;
 import dmd.dmodule;
+import dmd.dversion;
 import dmd.dscope;
 import dmd.dstruct;
 import dmd.dsymbolsem;
@@ -67,6 +68,8 @@ version (IN_LLVM)
  *    dg = delegate to call for each Dsymbol
  * Returns:
  *    last value returned by dg()
+ *
+ * See_Also: $(REF each, dmd, root, array)
  */
 int foreachDsymbol(Dsymbols* symbols, scope int delegate(Dsymbol) dg)
 {
@@ -91,6 +94,8 @@ int foreachDsymbol(Dsymbols* symbols, scope int delegate(Dsymbol) dg)
  * Params:
  *    symbols = Dsymbols
  *    dg = delegate to call for each Dsymbol
+ *
+ * See_Also: $(REF each, dmd, root, array)
  */
 void foreachDsymbol(Dsymbols* symbols, scope void delegate(Dsymbol) dg)
 {
@@ -126,7 +131,7 @@ struct Ungag
 struct Prot
 {
     ///
-    enum Kind : int
+    enum Kind : ubyte
     {
         undefined,
         none,           // no access
@@ -235,8 +240,16 @@ extern (C++) class Dsymbol : ASTNode
     Dsymbol parent;
     /// C++ namespace this symbol belongs to
     CPPNamespaceDeclaration cppnamespace;
+version (IN_LLVM)
+{
+    void* ir; // IrDsymbol*
+    uint llvmInternal;
+}
+else
+{
     Symbol* csym;           // symbol for code generator
     Symbol* isym;           // import version of csym
+}
     const(char)* comment;   // documentation comment for this Dsymbol
     const Loc loc;          // where defined
     Scope* _scope;          // !=null means context to use for semantic()
@@ -250,14 +263,6 @@ extern (C++) class Dsymbol : ASTNode
     // !=null means there's a ddoc unittest associated with this symbol
     // (only use this with ddoc)
     UnitTestDeclaration ddocUnittest;
-
-version (IN_LLVM)
-{
-    // llvm stuff
-    uint llvmInternal;
-
-    void* ir; // IrDsymbol*
-}
 
     final extern (D) this()
     {
@@ -342,9 +347,9 @@ version (IN_LLVM)
         return false;
     }
 
-    bool isAnonymous()
+    final bool isAnonymous() const
     {
-        return ident is null;
+        return ident is null || ident.isAnonymous;
     }
 
     extern(D) private const(char)[] prettyFormatHelper()
@@ -353,38 +358,77 @@ version (IN_LLVM)
         return '`' ~ cstr.toDString() ~ "`\0";
     }
 
-    final void error(const ref Loc loc, const(char)* format, ...)
+    static if (__VERSION__ < 2092)
     {
-        va_list ap;
-        va_start(ap, format);
-        .verror(loc, format, ap, kind(), prettyFormatHelper().ptr);
-        va_end(ap);
-    }
+        final void error(const ref Loc loc, const(char)* format, ...)
+        {
+            va_list ap;
+            va_start(ap, format);
+            .verror(loc, format, ap, kind(), prettyFormatHelper().ptr);
+            va_end(ap);
+        }
 
-    final void error(const(char)* format, ...)
-    {
-        va_list ap;
-        va_start(ap, format);
-        const loc = getLoc();
-        .verror(loc, format, ap, kind(), prettyFormatHelper().ptr);
-        va_end(ap);
-    }
+        final void error(const(char)* format, ...)
+        {
+            va_list ap;
+            va_start(ap, format);
+            const loc = getLoc();
+            .verror(loc, format, ap, kind(), prettyFormatHelper().ptr);
+            va_end(ap);
+        }
 
-    final void deprecation(const ref Loc loc, const(char)* format, ...)
-    {
-        va_list ap;
-        va_start(ap, format);
-        .vdeprecation(loc, format, ap, kind(), prettyFormatHelper().ptr);
-        va_end(ap);
-    }
+        final void deprecation(const ref Loc loc, const(char)* format, ...)
+        {
+            va_list ap;
+            va_start(ap, format);
+            .vdeprecation(loc, format, ap, kind(), prettyFormatHelper().ptr);
+            va_end(ap);
+        }
 
-    final void deprecation(const(char)* format, ...)
+        final void deprecation(const(char)* format, ...)
+        {
+            va_list ap;
+            va_start(ap, format);
+            const loc = getLoc();
+            .vdeprecation(loc, format, ap, kind(), prettyFormatHelper().ptr);
+            va_end(ap);
+        }
+    }
+    else
     {
-        va_list ap;
-        va_start(ap, format);
-        const loc = getLoc();
-        .vdeprecation(loc, format, ap, kind(), prettyFormatHelper().ptr);
-        va_end(ap);
+        pragma(printf) final void error(const ref Loc loc, const(char)* format, ...)
+        {
+            va_list ap;
+            va_start(ap, format);
+            .verror(loc, format, ap, kind(), prettyFormatHelper().ptr);
+            va_end(ap);
+        }
+
+        pragma(printf) final void error(const(char)* format, ...)
+        {
+            va_list ap;
+            va_start(ap, format);
+            const loc = getLoc();
+            .verror(loc, format, ap, kind(), prettyFormatHelper().ptr);
+            va_end(ap);
+        }
+
+        pragma(printf) final void deprecation(const ref Loc loc, const(char)* format, ...)
+        {
+            va_list ap;
+            va_start(ap, format);
+            .vdeprecation(loc, format, ap, kind(), prettyFormatHelper().ptr);
+            va_end(ap);
+        }
+
+        pragma(printf) final void deprecation(const(char)* format, ...)
+        {
+            va_list ap;
+            va_start(ap, format);
+            const loc = getLoc();
+            .vdeprecation(loc, format, ap, kind(), prettyFormatHelper().ptr);
+            va_end(ap);
+        }
     }
 
     final bool checkDeprecated(const ref Loc loc, Scope* sc)
@@ -408,6 +452,11 @@ version (IN_LLVM)
             deprecation(loc, "is deprecated - %s", message);
         else
             deprecation(loc, "is deprecated");
+
+        if (auto ti = sc.parent ? sc.parent.isInstantiated() : null)
+            ti.printInstantiationTrace(Classification.deprecation);
+        else if (auto ti = sc.parent ? sc.parent.isTemplateInstance() : null)
+            ti.printInstantiationTrace(Classification.deprecation);
 
         return true;
     }
@@ -496,6 +545,7 @@ version (IN_LLVM)
      * if a template declaration is non-local i.e. global or static.
      *
      * Examples:
+     * ---
      *  module mod;
      *  template Foo(alias a) { mixin Bar!(); }
      *  mixin template Bar() {
@@ -516,6 +566,7 @@ version (IN_LLVM)
      *  // s.toParent2() == FuncDeclaration('mod.test')
      *  // s.toParentDecl() == Module('mod')
      *  // s.toParentLocal() == FuncDeclaration('mod.test')
+     * ---
      */
     final inout(Dsymbol) toParent() inout
     {
@@ -817,7 +868,7 @@ version (IN_LLVM)
         /***************************************************
          * Search for symbol with correct spelling.
          */
-        extern (D) Dsymbol symbol_search_fp(const(char)[] seed, ref int cost)
+        extern (D) Dsymbol symbol_search_fp(const(char)[] seed, out int cost)
         {
             /* If not in the lexer's string table, it certainly isn't in the symbol table.
              * Doing this first is a lot faster.
@@ -827,7 +878,7 @@ version (IN_LLVM)
             Identifier id = Identifier.lookup(seed);
             if (!id)
                 return null;
-            cost = 0;
+            cost = 0;   // all the same cost
             Dsymbol s = this;
             Module.clearCache();
             return s.search(Loc.initial, id, IgnoreErrors);
@@ -1206,6 +1257,7 @@ version (IN_LLVM)
     inout(Declaration)                 isDeclaration()                 inout { return null; }
     inout(StorageClassDeclaration)     isStorageClassDeclaration()     inout { return null; }
     inout(ExpressionDsymbol)           isExpressionDsymbol()           inout { return null; }
+    inout(AliasAssign)                 isAliasAssign()                 inout { return null; }
     inout(ThisDeclaration)             isThisDeclaration()             inout { return null; }
     inout(TypeInfoDeclaration)         isTypeInfoDeclaration()         inout { return null; }
     inout(TupleDeclaration)            isTupleDeclaration()            inout { return null; }
@@ -1226,6 +1278,8 @@ version (IN_LLVM)
     inout(UnitTestDeclaration)         isUnitTestDeclaration()         inout { return null; }
     inout(NewDeclaration)              isNewDeclaration()              inout { return null; }
     inout(VarDeclaration)              isVarDeclaration()              inout { return null; }
+    inout(VersionSymbol)               isVersionSymbol()               inout { return null; }
+    inout(DebugSymbol)                 isDebugSymbol()                 inout { return null; }
     inout(ClassDeclaration)            isClassDeclaration()            inout { return null; }
     inout(StructDeclaration)           isStructDeclaration()           inout { return null; }
     inout(UnionDeclaration)            isUnionDeclaration()            inout { return null; }
@@ -1764,31 +1818,32 @@ extern (C++) final class WithScopeSymbol : ScopeDsymbol
  */
 extern (C++) final class ArrayScopeSymbol : ScopeDsymbol
 {
-    Expression exp;         // IndexExp or SliceExp
-    TypeTuple type;         // for tuple[length]
-    TupleDeclaration td;    // for tuples of objects
+    // either a SliceExp, an IndexExp, an ArrayExp, a TypeTuple or a TupleDeclaration.
+    // Discriminated using DYNCAST and, for expressions, also TOK
+    private RootObject arrayContent;
     Scope* sc;
 
     extern (D) this(Scope* sc, Expression exp)
     {
         super(exp.loc, null);
         assert(exp.op == TOK.index || exp.op == TOK.slice || exp.op == TOK.array);
-        this.exp = exp;
         this.sc = sc;
+        this.arrayContent = exp;
     }
 
     extern (D) this(Scope* sc, TypeTuple type)
     {
-        this.type = type;
         this.sc = sc;
+        this.arrayContent = type;
     }
 
     extern (D) this(Scope* sc, TupleDeclaration td)
     {
-        this.td = td;
         this.sc = sc;
+        this.arrayContent = td;
     }
 
+    /// This override is used to solve `$`
     override Dsymbol search(const ref Loc loc, Identifier ident, int flags = IgnoreNone)
     {
         //printf("ArrayScopeSymbol::search('%s', flags = %d)\n", ident.toChars(), flags);
@@ -1797,9 +1852,24 @@ extern (C++) final class ArrayScopeSymbol : ScopeDsymbol
 
         VarDeclaration* pvar;
         Expression ce;
-    L1:
-        if (td)
+
+        static Dsymbol dollarFromTypeTuple(const ref Loc loc, TypeTuple tt, Scope* sc)
         {
+
+            /* $ gives the number of type entries in the type tuple
+             */
+            auto v = new VarDeclaration(loc, Type.tsize_t, Id.dollar, null);
+            Expression e = new IntegerExp(Loc.initial, tt.arguments.dim, Type.tsize_t);
+            v._init = new ExpInitializer(Loc.initial, e);
+            v.storage_class |= STC.temp | STC.static_ | STC.const_;
+            v.dsymbolSemantic(sc);
+            return v;
+        }
+
+        const DYNCAST kind = arrayContent.dyncast();
+        if (kind == DYNCAST.dsymbol)
+        {
+            TupleDeclaration td = cast(TupleDeclaration) arrayContent;
             /* $ gives the number of elements in the tuple
              */
             auto v = new VarDeclaration(loc, Type.tsize_t, Id.dollar, null);
@@ -1809,17 +1879,11 @@ extern (C++) final class ArrayScopeSymbol : ScopeDsymbol
             v.dsymbolSemantic(sc);
             return v;
         }
-        if (type)
+        if (kind == DYNCAST.type)
         {
-            /* $ gives the number of type entries in the type tuple
-             */
-            auto v = new VarDeclaration(loc, Type.tsize_t, Id.dollar, null);
-            Expression e = new IntegerExp(Loc.initial, type.arguments.dim, Type.tsize_t);
-            v._init = new ExpInitializer(Loc.initial, e);
-            v.storage_class |= STC.temp | STC.static_ | STC.const_;
-            v.dsymbolSemantic(sc);
-            return v;
+            return dollarFromTypeTuple(loc, cast(TypeTuple) arrayContent, sc);
         }
+        Expression exp = cast(Expression) arrayContent;
         if (auto ie = exp.isIndexExp())
         {
             /* array[index] where index is some function of $
@@ -1856,10 +1920,7 @@ extern (C++) final class ArrayScopeSymbol : ScopeDsymbol
         if (auto te = ce.isTypeExp())
         {
             if (auto ttp = te.type.isTypeTuple())
-            {
-                type = ttp;
-                goto L1;
-            }
+                return dollarFromTypeTuple(loc, ttp, sc);
         }
         /* *pvar is lazily initialized, so if we refer to $
          * multiple times, it gets set only once.
@@ -2091,7 +2152,7 @@ extern (C++) final class ForwardingScopeDsymbol : ScopeDsymbol
 }
 
 /**
- * Class that holds an expression in a Dsymbol wraper.
+ * Class that holds an expression in a Dsymbol wrapper.
  * This is not an AST node, but a class used to pass
  * an expression as a function parameter of type Dsymbol.
  */
@@ -2110,6 +2171,45 @@ extern (C++) final class ExpressionDsymbol : Dsymbol
     }
 }
 
+/**********************************************
+ * Encapsulate assigning to an alias:
+ *      `identifier = type;`
+ * where `identifier` is an AliasDeclaration in scope.
+ */
+extern (C++) final class AliasAssign : Dsymbol
+{
+    Identifier ident; /// Dsymbol's ident will be null, as this class is anonymous
+    Type type;        /// replace previous RHS of AliasDeclaration with `type`
+
+    extern (D) this(const ref Loc loc, Identifier ident, Type type)
+    {
+        super(loc, null);
+        this.ident = ident;
+        this.type = type;
+    }
+
+    override Dsymbol syntaxCopy(Dsymbol s)
+    {
+        assert(!s);
+        AliasAssign aa = new AliasAssign(loc, ident, type.syntaxCopy());
+        return aa;
+    }
+
+    override inout(AliasAssign) isAliasAssign() inout
+    {
+        return this;
+    }
+
+    override const(char)* kind() const
+    {
+        return "aliasAssign";
+    }
+
+    override void accept(Visitor v)
+    {
+        v.visit(this);
+    }
+}
 
 /***********************************************************
  * Table of Dsymbol's

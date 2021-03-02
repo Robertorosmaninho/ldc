@@ -203,6 +203,11 @@ unittest
     }
 }
 
+version (DMDLIB)
+{
+    version = LocOffset;
+}
+
 /***********************************************************
  */
 class Lexer
@@ -373,11 +378,19 @@ class Lexer
             case '\r':
                 p++;
                 if (*p != '\n') // if CR stands by itself
+                {
                     endOfLine();
+                    goto skipFourSpaces;
+                }
                 continue; // skip white space
             case '\n':
                 p++;
                 endOfLine();
+                skipFourSpaces:
+                while (*(cast(uint*)p) == 0x20202020) //' ' == 0x20
+                {
+                    p+=4;
+                }
                 continue; // skip white space
             case '0':
                 if (!isZeroSecond(p[1]))        // if numeric literal does not continue
@@ -2276,6 +2289,8 @@ class Lexer
     final Loc loc() pure @nogc
     {
         scanloc.charnum = cast(uint)(1 + p - line);
+        version (LocOffset)
+            scanloc.fileOffset = cast(uint)(p - base);
         return scanloc;
     }
 

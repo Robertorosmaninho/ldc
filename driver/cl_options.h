@@ -45,6 +45,7 @@ extern cl::list<std::string> fileList;
 extern cl::list<std::string> runargs;
 extern cl::opt<bool> invokedByLDMD;
 extern cl::opt<bool> compileOnly;
+extern cl::opt<bool> emitDwarfDebugInfo;
 extern cl::opt<bool> noAsm;
 extern cl::opt<bool> dontWriteObj;
 extern cl::opt<std::string> objectFile;
@@ -70,6 +71,7 @@ extern cl::list<std::string> transitions;
 extern cl::list<std::string> previews;
 extern cl::list<std::string> reverts;
 extern cl::opt<std::string> moduleDeps;
+extern cl::opt<std::string> makeDeps;
 extern cl::opt<std::string> cacheDir;
 extern cl::list<std::string> linkerSwitches;
 extern cl::list<std::string> ccSwitches;
@@ -80,7 +82,6 @@ extern cl::opt<bool> m64bits;
 extern cl::opt<std::string> mTargetTriple;
 extern cl::opt<std::string> mABI;
 extern FloatABI::Type floatABI;
-extern cl::opt<bool> linkonceTemplates;
 extern cl::opt<bool> disableLinkerStripDead;
 extern cl::opt<unsigned char> defaultToHiddenVisibility;
 extern cl::opt<bool> noPLT;
@@ -102,6 +103,11 @@ extern std::vector<std::string> debugArgs;
 void createClashingOptions();
 void hideLLVMOptions();
 
+// Compilation time tracing options
+extern cl::opt<bool> fTimeTrace;
+extern cl::opt<std::string> fTimeTraceFile;
+extern cl::opt<unsigned> fTimeTraceGranularity;
+
 // LTO options
 enum LTOKind {
   LTO_None,
@@ -112,9 +118,7 @@ extern cl::opt<LTOKind> ltoMode;
 inline bool isUsingLTO() { return ltoMode != LTO_None; }
 inline bool isUsingThinLTO() { return ltoMode == LTO_Thin; }
 
-#if LDC_LLVM_VER >= 400
 extern cl::opt<std::string> saveOptimizationRecord;
-#endif
 #if LDC_LLVM_SUPPORTED_TARGET_SPIRV || LDC_LLVM_SUPPORTED_TARGET_NVPTX
 extern cl::list<std::string> dcomputeTargets;
 extern cl::opt<std::string> dcomputeFilePrefix;

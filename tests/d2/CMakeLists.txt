@@ -1,8 +1,6 @@
-include(CheckTypeSize)
-check_type_size(void* ptr_size)
-if(${ptr_size} MATCHES "^4$")
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     set(host_model 32)
-elseif(${ptr_size} MATCHES "^8$")
+else()
     set(host_model 64)
 endif()
 
@@ -64,10 +62,10 @@ string(REGEX REPLACE "[^0-9]*([0-9]+[0-9.]*).*" "\\1" GDB_VERSION "${GDB_VERSION
 # tests (e.g. 'testdstress') depend on contracts and invariants being active.
 # Need a solution integrated with d_do_test.
 add_testsuite("-debug" "-g -link-defaultlib-debug" "${gdb_flags}" "${host_model}" "all")
-add_testsuite("" "-O" "OFF" "${host_model}" "runnable")
+add_testsuite("" "-O -linkonce-templates" "OFF" "${host_model}" "runnable")
 
 if(MULTILIB AND host_model EQUAL 64)
     # Also test in 32 bit mode on x86_64 multilib builds.
     add_testsuite("-debug_32" "-g -link-defaultlib-debug" "${gdb_flags}" "32" "all")
-    add_testsuite("_32" "-O" "OFF" "32" "runnable")
+    add_testsuite("_32" "-O -linkonce-templates" "OFF" "32" "runnable")
 endif()

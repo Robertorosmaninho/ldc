@@ -464,6 +464,11 @@ package mixin template ParseVisitMethods(AST)
         t.exp.accept(this);
     }
 
+    override void visit(AST.TypeMixin t)
+    {
+        visitArgs(t.exps);
+    }
+
 //      Miscellaneous
 //========================================================
 
@@ -776,6 +781,12 @@ package mixin template ParseVisitMethods(AST)
             visitType(d.type);
     }
 
+    override void visit(AST.AliasAssign d)
+    {
+        //printf("Visting AliasAssign\n");
+        visitType(d.type);
+    }
+
     override void visit(AST.VarDeclaration d)
     {
         //printf("Visiting VarDeclaration\n");
@@ -847,7 +858,7 @@ package mixin template ParseVisitMethods(AST)
     override void visit(AST.NewDeclaration d)
     {
         //printf("Visiting NewDeclaration\n");
-        visitParameters(d.parameters);
+        visitParameters(d.parameterList.parameters);
         visitFuncBody(d);
     }
 
@@ -997,9 +1008,9 @@ package mixin template ParseVisitMethods(AST)
         e.e2.accept(this);
     }
 
-    override void visit(AST.CompileExp e)
+    override void visit(AST.MixinExp e)
     {
-        //printf("Visiting CompileExp\n");
+        //printf("Visiting MixinExp\n");
         visitArgs(e.exps);
     }
 

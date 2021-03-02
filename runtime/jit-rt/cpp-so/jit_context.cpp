@@ -64,13 +64,8 @@ std::unique_ptr<llvm::TargetMachine> createTargetMachine() {
   std::unique_ptr<llvm::TargetMachine> ret(target->createTargetMachine(
       triple, llvm::sys::getHostCPUName(), llvm::join(getHostAttrs(), ","), {},
       llvm::Optional<llvm::Reloc::Model>{},
-#if LDC_LLVM_VER == 500
-      llvm::CodeModel::JITDefault
-#else
       llvm::Optional<llvm::CodeModel::Model>{}, llvm::CodeGenOpt::Default,
-      /*jit*/ true
-#endif
-      ));
+      /*jit*/ true));
   assert(ret != nullptr);
   return ret;
 }
@@ -207,7 +202,12 @@ std::shared_ptr<llvm::orc::SymbolResolver>
 DynamicCompilerContext::createResolver() {
   return llvm::orc::createLegacyLookupResolver(
       execSession,
+#if LDC_LLVM_VER >= 1100
+      [this](llvm::StringRef name_) -> llvm::JITSymbol {
+        const std::string name = name_.str();
+#else
       [this](const std::string &name) -> llvm::JITSymbol {
+#endif
         if (auto Sym = compileLayer.findSymbol(name, false)) {
           return Sym;
         } else if (auto Err = Sym.takeError()) {

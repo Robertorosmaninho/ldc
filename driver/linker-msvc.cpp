@@ -21,11 +21,7 @@
 #include "llvm/Support/Path.h"
 
 #if LDC_WITH_LLD
-#if LDC_LLVM_VER >= 600
 #include "lld/Common/Driver.h"
-#else
-#include "lld/Driver/Driver.h"
-#endif
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
@@ -41,17 +37,11 @@ void addMscrtLibs(bool useInternalToolchain, std::vector<std::string> &args) {
   // Pick one of the 4 variants matching the selected main UCRT lib.
 
   if (useInternalToolchain) {
-#if LDC_LLVM_VER >= 400
     assert(mscrtlibName.contains_lower("vcruntime"));
-#endif
     return;
   }
 
-#if LDC_LLVM_VER >= 400
   const bool isStatic = mscrtlibName.contains_lower("libcmt");
-#else // LLVM 3.9: no llvm::StringRef::{contains,find}_lower
-  const bool isStatic = mscrtlibName.startswith_lower("libcmt");
-#endif
 
   const bool isDebug =
       mscrtlibName.endswith_lower("d") || mscrtlibName.endswith_lower("d.lib");
@@ -76,6 +66,10 @@ void addLibIfFound(std::vector<std::string> &args, const llvm::Twine &name) {
 void addSanitizerLibs(std::vector<std::string> &args) {
   if (opts::isSanitizerEnabled(opts::AddressSanitizer)) {
     args.push_back("ldc_rt.asan.lib");
+  }
+  if (opts::isSanitizerEnabled(opts::FuzzSanitizer)) {
+    args.push_back("ldc_rt.fuzzer.lib");
+    args.push_back("/SUBSYSTEM:CONSOLE"); // pull main() from fuzzer lib
   }
 
   // TODO: remaining sanitizers
@@ -216,23 +210,24 @@ int linkObjToBinaryMSVC(llvm::StringRef outputPath,
     addSwitch(ls);
   }
 
-  // default platform libs
-  // TODO check which libaries are necessary
-  args.push_back("kernel32.lib");
-  args.push_back("user32.lib");
-  args.push_back("gdi32.lib");
-  args.push_back("winspool.lib");
-  args.push_back("shell32.lib"); // required for dmain2.d
-  args.push_back("ole32.lib");
-  args.push_back("oleaut32.lib");
-  args.push_back("uuid.lib");
-  args.push_back("comdlg32.lib");
-  args.push_back("advapi32.lib");
-
-  // these get pulled in by druntime (rt/msvc.c); include explicitly for
-  // -betterC convenience (issue #3035)
-  args.push_back("oldnames.lib");
-  args.push_back("legacy_stdio_definitions.lib");
+  auto explicitPlatformLibs = getExplicitPlatformLibs();
+  if (explicitPlatformLibs.hasValue()) {
+    for (auto &lib : explicitPlatformLibs.getValue()) {
+      args.push_back(llvm::sys::path::has_extension(lib) ? std::move(lib)
+                                                         : lib + ".lib");
+    }
+  } else {
+    // default platform libs
+    // TODO check which libaries are necessary
+    args.insert(args.end(),
+                {"kernel32.lib", "user32.lib", "gdi32.lib", "winspool.lib",
+                 "shell32.lib", // required for dmain2.d
+                 "ole32.lib", "oleaut32.lib", "uuid.lib", "comdlg32.lib",
+                 "advapi32.lib",
+                 // these get pulled in by druntime (rt/msvc.c); include
+                 // explicitly for -betterC convenience (issue #3035)
+                 "oldnames.lib", "legacy_stdio_definitions.lib"});
+  }
 
   Logger::println("Linking with: ");
   Stream logstr = Logger::cout();
@@ -245,17 +240,14 @@ int linkObjToBinaryMSVC(llvm::StringRef outputPath,
 
 #if LDC_WITH_LLD
   if (useInternalLLDForLinking() ||
-      (useInternalToolchain && opts::linker.empty() && !opts::isUsingLTO())) {
+      (useInternalToolchain && opts::linker.empty())) {
     const auto fullArgs = getFullArgs("lld-link", args, global.params.verbose);
 
-    const bool success = lld::coff::link(fullArgs
-#if LDC_LLVM_VER >= 600
-                                         ,
+    const bool success = lld::coff::link(fullArgs,
                                          /*CanExitEarly=*/false
 #if LDC_LLVM_VER >= 1000
                                          ,
                                          llvm::outs(), llvm::errs()
-#endif
 #endif
     );
 

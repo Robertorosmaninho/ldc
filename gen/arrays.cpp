@@ -108,7 +108,7 @@ void DtoSetArrayToNull(LLValue *v) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static void DtoArrayInit(Loc &loc, LLValue *ptr, LLValue *length,
+static void DtoArrayInit(const Loc &loc, LLValue *ptr, LLValue *length,
                          DValue *elementValue) {
   IF_LOG Logger::println("DtoArrayInit");
   LOG_SCOPE;
@@ -144,7 +144,7 @@ static void DtoArrayInit(Loc &loc, LLValue *ptr, LLValue *length,
   llvm::BranchInst::Create(condbb, gIR->scopebb());
 
   // replace current scope
-  gIR->scope() = IRScope(condbb);
+  gIR->ir->SetInsertPoint(condbb);
 
   // create the condition
   LLValue *cond_val =
@@ -155,7 +155,7 @@ static void DtoArrayInit(Loc &loc, LLValue *ptr, LLValue *length,
   llvm::BranchInst::Create(bodybb, endbb, cond_val, gIR->scopebb());
 
   // rewrite scope
-  gIR->scope() = IRScope(bodybb);
+  gIR->ir->SetInsertPoint(bodybb);
 
   LLValue *itr_val = DtoLoad(itr);
   // assign array element value
@@ -171,7 +171,7 @@ static void DtoArrayInit(Loc &loc, LLValue *ptr, LLValue *length,
   llvm::BranchInst::Create(condbb, gIR->scopebb());
 
   // rewrite the scope
-  gIR->scope() = IRScope(endbb);
+  gIR->ir->SetInsertPoint(endbb);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -193,12 +193,13 @@ static LLValue *computeSize(LLValue *length, size_t elementSize) {
              : gIR->ir->CreateMul(length, DtoConstSize_t(elementSize));
 };
 
-static void copySlice(Loc &loc, LLValue *dstarr, LLValue *dstlen, LLValue *srcarr,
-                      LLValue *srclen, size_t elementSize, bool knownInBounds) {
+static void copySlice(const Loc &loc, LLValue *dstarr, LLValue *dstlen,
+                      LLValue *srcarr, LLValue *srclen, size_t elementSize,
+                      bool knownInBounds) {
   const bool checksEnabled =
       global.params.useAssert == CHECKENABLEon || gIR->emitArrayBoundsChecks();
   if (checksEnabled && !knownInBounds) {
-    LLValue *fn = getRuntimeFunction(loc, gIR->module, "_d_array_slice_copy");
+    LLFunction *fn = getRuntimeFunction(loc, gIR->module, "_d_array_slice_copy");
     gIR->CreateCallOrInvoke(
         fn, {dstarr, dstlen, srcarr, srclen, DtoConstSize_t(elementSize)}, "",
         /*isNothrow=*/true);
@@ -224,7 +225,7 @@ static bool arrayNeedsPostblit(Type *t) {
 
 // Does array assignment (or initialization) from another array of the same
 // element type or from an appropriate single element.
-void DtoArrayAssign(Loc &loc, DValue *lhs, DValue *rhs, int op,
+void DtoArrayAssign(const Loc &loc, DValue *lhs, DValue *rhs, int op,
                     bool canSkipPostblit) {
   IF_LOG Logger::println("DtoArrayAssign");
   LOG_SCOPE;
@@ -293,20 +294,17 @@ void DtoArrayAssign(Loc &loc, DValue *lhs, DValue *rhs, int op,
       }
     } else if (isConstructing) {
       LLFunction *fn = getRuntimeFunction(loc, gIR->module, "_d_arrayctor");
-      LLCallSite call = gIR->CreateCallOrInvoke(fn, DtoTypeInfoOf(elemType),
-                                                DtoSlice(rhsPtr, rhsLength),
-                                                DtoSlice(lhsPtr, lhsLength));
-      call.setCallingConv(llvm::CallingConv::C);
-    } else // assigning
-    {
+      gIR->CreateCallOrInvoke(fn, DtoTypeInfoOf(loc, elemType),
+                              DtoSlice(rhsPtr, rhsLength),
+                              DtoSlice(lhsPtr, lhsLength));
+    } else { // assigning
       LLValue *tmpSwap = DtoAlloca(elemType, "arrayAssign.tmpSwap");
       LLFunction *fn = getRuntimeFunction(
           loc, gIR->module,
           !canSkipPostblit ? "_d_arrayassign_l" : "_d_arrayassign_r");
-      LLCallSite call = gIR->CreateCallOrInvoke(
-          fn, DtoTypeInfoOf(elemType), DtoSlice(rhsPtr, rhsLength),
+      gIR->CreateCallOrInvoke(
+          fn, DtoTypeInfoOf(loc, elemType), DtoSlice(rhsPtr, rhsLength),
           DtoSlice(lhsPtr, lhsLength), DtoBitCast(tmpSwap, getVoidPtrType()));
-      call.setCallingConv(llvm::CallingConv::C);
     }
   } else {
     // scalar rhs:
@@ -335,12 +333,11 @@ void DtoArrayAssign(Loc &loc, DValue *lhs, DValue *rhs, int op,
       LLFunction *fn = getRuntimeFunction(loc, gIR->module,
                                           isConstructing ? "_d_arraysetctor"
                                                          : "_d_arraysetassign");
-      LLCallSite call = gIR->CreateCallOrInvoke(
+      gIR->CreateCallOrInvoke(
           fn, lhsPtr, DtoBitCast(makeLValue(loc, rhs), getVoidPtrType()),
           gIR->ir->CreateTruncOrBitCast(lhsLength,
                                         LLType::getInt32Ty(gIR->context())),
-          DtoTypeInfoOf(stripModifiers(t2)));
-      call.setCallingConv(llvm::CallingConv::C);
+          DtoTypeInfoOf(loc, stripModifiers(t2)));
     }
   }
 }
@@ -678,7 +675,7 @@ static DSliceValue *getSlice(Type *arrayType, LLValue *array) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-DSliceValue *DtoNewDynArray(Loc &loc, Type *arrayType, DValue *dim,
+DSliceValue *DtoNewDynArray(const Loc &loc, Type *arrayType, DValue *dim,
                             bool defaultInit) {
   IF_LOG Logger::println("DtoNewDynArray : %s", arrayType->toChars());
   LOG_SCOPE;
@@ -696,7 +693,7 @@ DSliceValue *DtoNewDynArray(Loc &loc, Type *arrayType, DValue *dim,
   LLFunction *fn = getRuntimeFunction(loc, gIR->module, fnname);
 
   // typeinfo arg
-  LLValue *arrayTypeInfo = DtoTypeInfoOf(arrayType);
+  LLValue *arrayTypeInfo = DtoTypeInfoOf(loc, arrayType);
 
   // dim arg
   assert(DtoType(dim->type) == DtoSize_t());
@@ -704,8 +701,7 @@ DSliceValue *DtoNewDynArray(Loc &loc, Type *arrayType, DValue *dim,
 
   // call allocator
   LLValue *newArray =
-      gIR->CreateCallOrInvoke(fn, arrayTypeInfo, arrayLen, ".gc_mem")
-          .getInstruction();
+      gIR->CreateCallOrInvoke(fn, arrayTypeInfo, arrayLen, ".gc_mem");
 
   // return a DSliceValue with the well-known length for better optimizability
   auto ptr =
@@ -714,8 +710,8 @@ DSliceValue *DtoNewDynArray(Loc &loc, Type *arrayType, DValue *dim,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-DSliceValue *DtoNewMulDimDynArray(Loc &loc, Type *arrayType, DValue **dims,
-                                  size_t ndims) {
+DSliceValue *DtoNewMulDimDynArray(const Loc &loc, Type *arrayType,
+                                  DValue **dims, size_t ndims) {
   IF_LOG Logger::println("DtoNewMulDimDynArray : %s", arrayType->toChars());
   LOG_SCOPE;
 
@@ -731,7 +727,7 @@ DSliceValue *DtoNewMulDimDynArray(Loc &loc, Type *arrayType, DValue **dims,
   LLFunction *fn = getRuntimeFunction(loc, gIR->module, fnname);
 
   // typeinfo arg
-  LLValue *arrayTypeInfo = DtoTypeInfoOf(arrayType);
+  LLValue *arrayTypeInfo = DtoTypeInfoOf(loc, arrayType);
 
   // Check if constant
   bool allDimsConst = true;
@@ -774,8 +770,7 @@ DSliceValue *DtoNewMulDimDynArray(Loc &loc, Type *arrayType, DValue **dims,
 
   // call allocator
   LLValue *newptr =
-      gIR->CreateCallOrInvoke(fn, arrayTypeInfo, DtoLoad(darray), ".gc_mem")
-          .getInstruction();
+      gIR->CreateCallOrInvoke(fn, arrayTypeInfo, DtoLoad(darray), ".gc_mem");
 
   IF_LOG Logger::cout() << "final ptr = " << *newptr << '\n';
 
@@ -783,7 +778,7 @@ DSliceValue *DtoNewMulDimDynArray(Loc &loc, Type *arrayType, DValue **dims,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-DSliceValue *DtoResizeDynArray(Loc &loc, Type *arrayType, DValue *array,
+DSliceValue *DtoResizeDynArray(const Loc &loc, Type *arrayType, DValue *array,
                                LLValue *newdim) {
   IF_LOG Logger::println("DtoResizeDynArray : %s", arrayType->toChars());
   LOG_SCOPE;
@@ -802,19 +797,17 @@ DSliceValue *DtoResizeDynArray(Loc &loc, Type *arrayType, DValue *array,
       getRuntimeFunction(loc, gIR->module, zeroInit ? "_d_arraysetlengthT"
                                                     : "_d_arraysetlengthiT");
 
-  LLValue *newArray =
-      gIR->CreateCallOrInvoke(
-             fn, DtoTypeInfoOf(arrayType), newdim,
-             DtoBitCast(DtoLVal(array), fn->getFunctionType()->getParamType(2)),
-             ".gc_mem")
-          .getInstruction();
+  LLValue *newArray = gIR->CreateCallOrInvoke(
+      fn, DtoTypeInfoOf(loc, arrayType), newdim,
+      DtoBitCast(DtoLVal(array), fn->getFunctionType()->getParamType(2)),
+      ".gc_mem");
 
   return getSlice(arrayType, newArray);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void DtoCatAssignElement(Loc &loc, DValue *array, Expression *exp) {
+void DtoCatAssignElement(const Loc &loc, DValue *array, Expression *exp) {
   IF_LOG Logger::println("DtoCatAssignElement");
   LOG_SCOPE;
 
@@ -829,7 +822,7 @@ void DtoCatAssignElement(Loc &loc, DValue *array, Expression *exp) {
   // potentially moved to a new block).
   LLFunction *fn = getRuntimeFunction(loc, gIR->module, "_d_arrayappendcTX");
   gIR->CreateCallOrInvoke(
-      fn, DtoTypeInfoOf(arrayType),
+      fn, DtoTypeInfoOf(loc, arrayType),
       DtoBitCast(DtoLVal(array), fn->getFunctionType()->getParamType(1)),
       DtoConstSize_t(1), ".appendedArray");
 
@@ -846,28 +839,25 @@ void DtoCatAssignElement(Loc &loc, DValue *array, Expression *exp) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DSliceValue *DtoCatAssignArray(Loc &loc, DValue *arr, Expression *exp) {
+DSliceValue *DtoCatAssignArray(const Loc &loc, DValue *arr, Expression *exp) {
   IF_LOG Logger::println("DtoCatAssignArray");
   LOG_SCOPE;
   Type *arrayType = arr->type;
 
   LLFunction *fn = getRuntimeFunction(loc, gIR->module, "_d_arrayappendT");
   // Call _d_arrayappendT(TypeInfo ti, byte[] *px, byte[] y)
-  LLValue *newArray =
-      gIR->CreateCallOrInvoke(
-             fn, DtoTypeInfoOf(arrayType),
-             DtoBitCast(DtoLVal(arr), fn->getFunctionType()->getParamType(1)),
-             DtoAggrPaint(DtoSlice(exp),
-                          fn->getFunctionType()->getParamType(2)),
-             ".appendedArray")
-          .getInstruction();
+  LLValue *newArray = gIR->CreateCallOrInvoke(
+      fn, DtoTypeInfoOf(loc, arrayType),
+      DtoBitCast(DtoLVal(arr), fn->getFunctionType()->getParamType(1)),
+      DtoAggrPaint(DtoSlice(exp), fn->getFunctionType()->getParamType(2)),
+      ".appendedArray");
 
   return getSlice(arrayType, newArray);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DSliceValue *DtoCatArrays(Loc &loc, Type *arrayType, Expression *exp1,
+DSliceValue *DtoCatArrays(const Loc &loc, Type *arrayType, Expression *exp1,
                           Expression *exp2) {
   IF_LOG Logger::println("DtoCatAssignArray");
   LOG_SCOPE;
@@ -911,14 +901,14 @@ DSliceValue *DtoCatArrays(Loc &loc, Type *arrayType, Expression *exp1,
                                        LLType::getInt8Ty(gIR->context()))))));
 
     // TypeInfo ti
-    args.push_back(DtoTypeInfoOf(arrayType));
+    args.push_back(DtoTypeInfoOf(loc, arrayType));
     // byte[][] arrs
     args.push_back(val);
   } else {
     fn = getRuntimeFunction(loc, gIR->module, "_d_arraycatT");
 
     // TypeInfo ti
-    args.push_back(DtoTypeInfoOf(arrayType));
+    args.push_back(DtoTypeInfoOf(loc, arrayType));
     // byte[] x
     LLValue *val = DtoLoad(DtoSlicePtr(exp1));
     val = DtoAggrPaint(val, fn->getFunctionType()->getParamType(1));
@@ -929,14 +919,13 @@ DSliceValue *DtoCatArrays(Loc &loc, Type *arrayType, Expression *exp1,
     args.push_back(val);
   }
 
-  auto newArray =
-      gIR->CreateCallOrInvoke(fn, args, ".appendedArray").getInstruction();
+  auto newArray = gIR->CreateCallOrInvoke(fn, args, ".appendedArray");
   return getSlice(arrayType, newArray);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DSliceValue *DtoAppendDChar(Loc &loc, DValue *arr, Expression *exp,
+DSliceValue *DtoAppendDChar(const Loc &loc, DValue *arr, Expression *exp,
                             const char *func) {
   LLValue *valueToAppend = DtoRVal(exp);
 
@@ -944,20 +933,18 @@ DSliceValue *DtoAppendDChar(Loc &loc, DValue *arr, Expression *exp,
   LLFunction *fn = getRuntimeFunction(loc, gIR->module, func);
 
   // Call function (ref string x, dchar c)
-  LLValue *newArray =
-      gIR->CreateCallOrInvoke(
-             fn,
-             DtoBitCast(DtoLVal(arr), fn->getFunctionType()->getParamType(0)),
-             DtoBitCast(valueToAppend, fn->getFunctionType()->getParamType(1)),
-             ".appendedArray")
-          .getInstruction();
+  LLValue *newArray = gIR->CreateCallOrInvoke(
+      fn, DtoBitCast(DtoLVal(arr), fn->getFunctionType()->getParamType(0)),
+      DtoBitCast(valueToAppend, fn->getFunctionType()->getParamType(1)),
+      ".appendedArray");
 
   return getSlice(arr->type, newArray);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DSliceValue *DtoAppendDCharToString(Loc &loc, DValue *arr, Expression *exp) {
+DSliceValue *DtoAppendDCharToString(const Loc &loc, DValue *arr,
+                                    Expression *exp) {
   IF_LOG Logger::println("DtoAppendDCharToString");
   LOG_SCOPE;
   return DtoAppendDChar(loc, arr, exp, "_d_arrayappendcd");
@@ -965,7 +952,7 @@ DSliceValue *DtoAppendDCharToString(Loc &loc, DValue *arr, Expression *exp) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DSliceValue *DtoAppendDCharToUnicodeString(Loc &loc, DValue *arr,
+DSliceValue *DtoAppendDCharToUnicodeString(const Loc &loc, DValue *arr,
                                            Expression *exp) {
   IF_LOG Logger::println("DtoAppendDCharToUnicodeString");
   LOG_SCOPE;
@@ -975,8 +962,8 @@ DSliceValue *DtoAppendDCharToUnicodeString(Loc &loc, DValue *arr,
 ////////////////////////////////////////////////////////////////////////////////
 namespace {
 // helper for eq and cmp
-LLValue *DtoArrayEqCmp_impl(Loc &loc, const char *func, DValue *l,
-                                   DValue *r, bool useti) {
+LLValue *DtoArrayEqCmp_impl(const Loc &loc, const char *func, DValue *l,
+                            DValue *r, bool useti) {
   IF_LOG Logger::println("comparing arrays");
   LLFunction *fn = getRuntimeFunction(loc, gIR->module, func);
   assert(fn);
@@ -999,11 +986,11 @@ LLValue *DtoArrayEqCmp_impl(Loc &loc, const char *func, DValue *l,
 
   // pass array typeinfo ?
   if (useti) {
-    LLValue *tival = DtoTypeInfoOf(l->type);
+    LLValue *tival = DtoTypeInfoOf(loc, l->type);
     args.push_back(DtoBitCast(tival, fn->getFunctionType()->getParamType(2)));
   }
 
-  return gIR->CreateCallOrInvoke(fn, args).getInstruction();
+  return gIR->CreateCallOrInvoke(fn, args);
 }
 
 /// When `true` is returned, the type can be compared using `memcmp`.
@@ -1068,7 +1055,7 @@ bool validCompareWithMemcmp(DValue *l, DValue *r) {
 }
 
 // Create a call instruction to memcmp.
-llvm::CallInst *callMemcmp(Loc &loc, IRState &irs, LLValue *l_ptr,
+llvm::CallInst *callMemcmp(const Loc &loc, IRState &irs, LLValue *l_ptr,
                            LLValue *r_ptr, LLValue *numElements) {
   assert(l_ptr && r_ptr && numElements);
   LLFunction *fn = getRuntimeFunction(loc, gIR->module, "memcmp");
@@ -1090,7 +1077,8 @@ llvm::CallInst *callMemcmp(Loc &loc, IRState &irs, LLValue *l_ptr,
 /// with memcmp.
 ///
 /// Note: the dynamic array length check is not covered by (LDC's) PGO.
-LLValue *DtoArrayEqCmp_memcmp(Loc &loc, DValue *l, DValue *r, IRState &irs) {
+LLValue *DtoArrayEqCmp_memcmp(const Loc &loc, DValue *l, DValue *r,
+                              IRState &irs) {
   IF_LOG Logger::println("Comparing arrays using memcmp");
 
   auto *l_ptr = DtoArrayPtr(l);
@@ -1118,12 +1106,12 @@ LLValue *DtoArrayEqCmp_memcmp(Loc &loc, DValue *l, DValue *r, IRState &irs) {
   // Note: no extra null checks are needed before passing the pointers to memcmp.
   // The array comparison is UB for non-zero length, and memcmp will correctly
   // return 0 (equality) when the length is zero.
-  irs.scope() = IRScope(memcmpBB);
+  irs.ir->SetInsertPoint(memcmpBB);
   auto memcmpAnswer = callMemcmp(loc, irs, l_ptr, r_ptr, l_length);
   irs.ir->CreateBr(memcmpEndBB);
 
   // Merge the result of length check and memcmp call into a phi node.
-  irs.scope() = IRScope(memcmpEndBB);
+  irs.ir->SetInsertPoint(memcmpEndBB);
   llvm::PHINode *phi =
       irs.ir->CreatePHI(LLType::getInt32Ty(gIR->context()), 2, "cmp_result");
   phi->addIncoming(DtoConstInt(1), incomingBB);
@@ -1134,7 +1122,7 @@ LLValue *DtoArrayEqCmp_memcmp(Loc &loc, DValue *l, DValue *r, IRState &irs) {
 } // end anonymous namespace
 
 ////////////////////////////////////////////////////////////////////////////////
-LLValue *DtoArrayEquals(Loc &loc, TOK op, DValue *l, DValue *r) {
+LLValue *DtoArrayEquals(const Loc &loc, TOK op, DValue *l, DValue *r) {
   LLValue *res = nullptr;
 
   if (r->isNull()) {
@@ -1230,7 +1218,7 @@ LLValue *DtoArrayPtr(DValue *v) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-DValue *DtoCastArray(Loc &loc, DValue *u, Type *to) {
+DValue *DtoCastArray(const Loc &loc, DValue *u, Type *to) {
   IF_LOG Logger::println("DtoCastArray");
   LOG_SCOPE;
 
@@ -1323,7 +1311,7 @@ DValue *DtoCastArray(Loc &loc, DValue *u, Type *to) {
   return new DLValue(to, castedPtr);
 }
 
-void DtoIndexBoundsCheck(Loc &loc, DValue *arr, DValue *index) {
+void DtoIndexBoundsCheck(const Loc &loc, DValue *arr, DValue *index) {
   Type *arrty = arr->type->toBasetype();
   assert(
       (arrty->ty == Tsarray || arrty->ty == Tarray || arrty->ty == Tpointer) &&
@@ -1348,14 +1336,14 @@ void DtoIndexBoundsCheck(Loc &loc, DValue *arr, DValue *index) {
   gIR->ir->CreateCondBr(cond, okbb, failbb);
 
   // set up failbb to call the array bounds error runtime function
-  gIR->scope() = IRScope(failbb);
+  gIR->ir->SetInsertPoint(failbb);
   DtoBoundsCheckFailCall(gIR, loc);
 
   // if ok, proceed in okbb
-  gIR->scope() = IRScope(okbb);
+  gIR->ir->SetInsertPoint(okbb);
 }
 
-void DtoBoundsCheckFailCall(IRState *irs, Loc &loc) {
+void DtoBoundsCheckFailCall(IRState *irs, const Loc &loc) {
   Module *const module = irs->func()->decl->getModule();
 
   if (global.params.checkAction == CHECKACTION_C) {

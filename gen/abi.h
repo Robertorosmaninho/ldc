@@ -124,6 +124,10 @@ struct TargetABI {
   /// attribute.
   virtual bool returnInArg(TypeFunction *tf, bool needsThis) = 0;
 
+  /// Returns true if the specified parameter type (a POD) should be passed by
+  /// ref for `in` params with -preview=in.
+  virtual bool preferPassByRef(Type *t);
+
   /// Returns true if the D type is passed using the LLVM ByVal attribute.
   ///
   /// ByVal arguments are bitcopied to the callee's function parameters stack in
@@ -177,6 +181,11 @@ struct TargetABI {
   /// rewriteType: an array of its fundamental type.
   static bool isHFVA(Type *t, int maxNumElements,
                      llvm::Type **hfvaType = nullptr);
+
+  /// Check if `t` is a Homogeneous Vector Aggregate (HVA). If so, optionally
+  /// produce the rewriteType: an array of its fundamental type.
+  static bool isHVA(Type *t, int maxNumElements,
+                    llvm::Type **hvaType = nullptr);
 
   /// Uses the front-end toArgTypes* machinery and returns an appropriate LL
   /// type if arguments of the specified D type are to be rewritten in order to

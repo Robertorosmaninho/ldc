@@ -22,8 +22,8 @@
 
 using llvm::APFloat;
 
-// in dmd/argtypes.d:
-TypeTuple *toArgTypes(Type *t);
+// in dmd/argtypes_x86.d:
+TypeTuple *toArgTypes_x86(Type *t);
 // in dmd/argtypes_sysv_x64.d:
 TypeTuple *toArgTypes_sysv_x64(Type *t);
 // in dmd/argtypes_aarch64.d:
@@ -37,15 +37,15 @@ namespace {
  * aligned, so the returned field size is a multiple of pointer-size.
  */
 unsigned getCriticalSectionSize(const Param &params) {
+  const auto &triple = *params.targetTriple;
   const bool is64bit = params.is64bit;
 
   // Windows: sizeof(CRITICAL_SECTION)
-  if (params.isWindows)
+  if (triple.isOSWindows())
     return is64bit ? 40 : 24;
 
   // POSIX: sizeof(pthread_mutex_t)
   // based on druntime/src/core/sys/posix/sys/types.d
-  const auto &triple = *params.targetTriple;
 
   if (triple.isOSDarwin())
     return is64bit ? 64 : 44;
@@ -79,11 +79,10 @@ unsigned getCriticalSectionSize(const Param &params) {
 } // anonymous namespace
 
 void Target::_init(const Param &params) {
-  CTFloat::initialize();
+  this->params = &params;
 
-  FloatProperties.initialize();
-  DoubleProperties.initialize();
-  RealProperties.initialize();
+  CTFloat::initialize();
+  initFPTypeProperties();
 
   const auto &triple = *params.targetTriple;
   const bool isMSVC = triple.isWindowsMSVCEnvironment();
@@ -106,18 +105,15 @@ void Target::_init(const Param &params) {
 
   objc.supported = params.hasObjectiveC;
 
+  const llvm::StringRef archName = triple.getArchName();
+  architectureName = {archName.size(), archName.data()};
+
   // Finalize RealProperties for the target's `real` type.
 
   const auto targetRealSemantics = &real->getFltSemantics();
-#if LDC_LLVM_VER >= 400
   const auto IEEEdouble = &APFloat::IEEEdouble();
   const auto x87DoubleExtended = &APFloat::x87DoubleExtended();
   const auto IEEEquad = &APFloat::IEEEquad();
-#else
-  const auto IEEEdouble = &APFloat::IEEEdouble;
-  const auto x87DoubleExtended = &APFloat::x87DoubleExtended;
-  const auto IEEEquad = &APFloat::IEEEquad;
-#endif
 
   RealProperties.nan = CTFloat::nan;
   RealProperties.infinity = CTFloat::infinity;
@@ -180,9 +176,9 @@ unsigned Target::alignsize(Type *type) {
 unsigned Target::fieldalign(Type *type) { return DtoAlignment(type); }
 
 Type *Target::va_listType(const Loc &loc, Scope *sc) {
-  if (!va_list)
-    va_list = typeSemantic(gABI->vaListType(), loc, sc);
-  return va_list;
+  if (!tvalist)
+    tvalist = typeSemantic(gABI->vaListType(), loc, sc);
+  return tvalist;
 }
 
 /**
@@ -208,7 +204,7 @@ TypeTuple *Target::toArgTypes(Type *t) {
   const auto &triple = *global.params.targetTriple;
   const auto arch = triple.getArch();
   if (arch == llvm::Triple::x86)
-    return ::toArgTypes(t);
+    return toArgTypes_x86(t);
   if (arch == llvm::Triple::x86_64 && !triple.isOSWindows())
     return toArgTypes_sysv_x64(t);
   if (arch == llvm::Triple::aarch64 || arch == llvm::Triple::aarch64_be)
@@ -219,6 +215,8 @@ TypeTuple *Target::toArgTypes(Type *t) {
 bool Target::isReturnOnStack(TypeFunction *tf, bool needsThis) {
   return gABI->returnInArg(tf, needsThis);
 }
+
+bool Target::preferPassByRef(Type *t) { return gABI->preferPassByRef(t); }
 
 Expression *Target::getTargetInfo(const char *name_, const Loc &loc) {
   const llvm::StringRef name(name_);
@@ -236,10 +234,8 @@ Expression *Target::getTargetInfo(const char *name_, const Loc &loc) {
       objectFormat = "macho";
     } else if (triple.isOSBinFormatELF()) {
       objectFormat = "elf";
-#if LDC_LLVM_VER >= 500
     } else if (triple.isOSBinFormatWasm()) {
       objectFormat = "wasm";
-#endif
     }
     return createStringExp(objectFormat);
   }

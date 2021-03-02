@@ -34,7 +34,7 @@ import dmd.root.rmem;
 import dmd.target;
 import dmd.visitor;
 
-enum Abstract : int
+enum Abstract : ubyte
 {
     fwdref = 0,      // whether an abstract class is not yet computed
     yes,             // is abstract class
@@ -85,40 +85,20 @@ extern (C++) struct BaseClass
         for (size_t j = sym.vtblOffset(); j < sym.vtbl.dim; j++)
         {
             FuncDeclaration ifd = sym.vtbl[j].isFuncDeclaration();
-            FuncDeclaration fd;
-            TypeFunction tf;
 
             //printf("        vtbl[%d] is '%s'\n", j, ifd ? ifd.toChars() : "null");
             assert(ifd);
 
             // Find corresponding function in this class
-            tf = ifd.type.toTypeFunction();
-            fd = cd.findFunc(ifd.ident, tf);
+            auto tf = ifd.type.toTypeFunction();
+            auto fd = cd.findFunc(ifd.ident, tf);
             if (fd && !fd.isAbstract())
             {
-                //printf("            found\n");
-                // Check that calling conventions match
-                if (fd.linkage != ifd.linkage)
-                    fd.error("linkage doesn't match interface function");
-
-                // Check that it is current
-                //printf("newinstance = %d fd.toParent() = %s ifd.toParent() = %s\n",
-                    //newinstance, fd.toParent().toChars(), ifd.toParent().toChars());
-                if (newinstance && fd.toParent() != cd && ifd.toParent() == sym)
-                    cd.error("interface function `%s` is not implemented", ifd.toFullSignature());
-
                 if (fd.toParent() == cd)
                     result = true;
             }
             else
-            {
-                //printf("            not found %p\n", fd);
-                // BUG: should mark this class as abstract?
-                if (!cd.isAbstract())
-                    cd.error("interface function `%s` is not implemented", ifd.toFullSignature());
-
                 fd = null;
-            }
             if (vtbl)
                 (*vtbl)[j] = fd;
         }
@@ -149,7 +129,7 @@ extern (C++) struct BaseClass
     }
 }
 
-enum ClassFlags : int
+enum ClassFlags : uint
 {
     none          = 0x0,
     isCOMclass    = 0x1,
@@ -208,10 +188,6 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
     /// to prevent recursive attempts
     private bool inuse;
 
-    /// true if this class has an identifier, but was originally declared anonymous
-    /// used in support of https://issues.dlang.org/show_bug.cgi?id=17371
-    private bool isActuallyAnonymous;
-
     Abstract isabstract;
 
     /// set the progress of base classes resolving
@@ -223,18 +199,19 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
      */
     ObjcClassDeclaration objc;
 
+version (IN_LLVM) {} else
+{
     Symbol* cpp_type_info_ptr_sym;      // cached instance of class Id.cpp_type_info_ptr
+}
 
     final extern (D) this(const ref Loc loc, Identifier id, BaseClasses* baseclasses, Dsymbols* members, bool inObject)
     {
         objc = ObjcClassDeclaration(this);
 
         if (!id)
-        {
-            isActuallyAnonymous = true;
-        }
+            id = Identifier.generateAnonymousId("class");
 
-        super(loc, id ? id : Identifier.generateId("__anonclass"));
+        super(loc, id);
 
         __gshared const(char)* msg = "only object.d can define this reserved class name";
 
@@ -404,6 +381,14 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
     static ClassDeclaration create(Loc loc, Identifier id, BaseClasses* baseclasses, Dsymbols* members, bool inObject)
     {
         return new ClassDeclaration(loc, id, baseclasses, members, inObject);
+    }
+
+    override const(char)* toPrettyChars(bool qualifyTypes = false)
+    {
+        if (objc.isMeta)
+            return .objc.toPrettyChars(this, qualifyTypes);
+
+        return super.toPrettyChars(qualifyTypes);
     }
 
     override Dsymbol syntaxCopy(Dsymbol s)
@@ -592,9 +577,11 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
 
             alignsize = baseClass.alignsize;
             structsize = baseClass.structsize;
-            if (classKind == ClassKind.cpp && global.params.isWindows)
+            if (classKind == ClassKind.cpp && global.params.targetOS == TargetOS.Windows)
                 structsize = (structsize + alignsize - 1) & ~(alignsize - 1);
         }
+        else if (classKind == ClassKind.objc)
+            structsize = 0; // no hidden member for an Objective-C class
         else if (isInterfaceDeclaration())
         {
             if (interfaces.length == 0)
@@ -693,11 +680,6 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
     final bool hasMonitor()
     {
         return classKind == ClassKind.d;
-    }
-
-    override bool isAnonymous()
-    {
-        return isActuallyAnonymous;
     }
 
     final bool isFuncHidden(FuncDeclaration fd)

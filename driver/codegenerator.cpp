@@ -48,11 +48,13 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/YAMLTraits.h"
-
-#if LDC_LLVM_VER < 600
-namespace llvm {
-using ToolOutputFile = tool_output_file;
-}
+#if LDC_MLIR_ENABLED
+#if LDC_LLVM_VER >= 1200
+#include "mlir/IR/BuiltinOps.h"
+#else
+#include "mlir/IR/Module.h"
+#endif
+#include "mlir/IR/MLIRContext.h"
 #endif
 
 #if LDC_LLVM_VER >= 1000
@@ -68,7 +70,6 @@ createAndSetDiagnosticsOutputFile(IRState &irs, llvm::LLVMContext &ctx,
                                   llvm::StringRef filename) {
   std::unique_ptr<llvm::ToolOutputFile> diagnosticsOutputFile;
 
-#if LDC_LLVM_VER >= 400
   // Set LLVM Diagnostics outputfile if requested
   if (opts::saveOptimizationRecord.getNumOccurrences() > 0) {
     llvm::SmallString<128> diagnosticsFilename;
@@ -88,7 +89,17 @@ createAndSetDiagnosticsOutputFile(IRState &irs, llvm::LLVMContext &ctx,
         auto remarksFileOrError = llvm::setupOptimizationRemarks(
 #endif
 #if LDC_LLVM_VER >= 900
+<<<<<<< HEAD
         ctx, diagnosticsFilename, "", "", withHotness);
+=======
+    auto remarksFileOrError =
+#if LDC_LLVM_VER >= 1100
+        llvm::setupLLVMOptimizationRemarks(
+#else
+        llvm::setupOptimizationRemarks(
+#endif
+            ctx, diagnosticsFilename, "", "", withHotness);
+>>>>>>> v1.25.1
     if (llvm::Error e = remarksFileOrError.takeError()) {
       irs.dmodule->error("Could not create file %s: %s",
                          diagnosticsFilename.c_str(),
@@ -111,64 +122,19 @@ createAndSetDiagnosticsOutputFile(IRState &irs, llvm::LLVMContext &ctx,
         llvm::make_unique<llvm::yaml::Output>(diagnosticsOutputFile->os()));
 
     if (withHotness) {
+<<<<<<< HEAD
 
 #if LDC_LLVM_VER >= 500
+=======
+>>>>>>> v1.25.1
       ctx.setDiagnosticsHotnessRequested(true);
-#else
-      ctx.setDiagnosticHotnessRequested(true);
-#endif
     }
 #endif // LDC_LLVM_VER < 900
   }
-#endif
 
   return diagnosticsOutputFile;
 }
 
-#if LDC_LLVM_VER < 500
-/// Add the Linker Options module flag.
-/// If the flag is already present, merge it with the new data.
-void emitLinkerOptions(IRState &irs) {
-  llvm::Module &M = irs.module;
-  llvm::LLVMContext &ctx = irs.context();
-  if (!M.getModuleFlag("Linker Options")) {
-    M.addModuleFlag(llvm::Module::AppendUnique, "Linker Options",
-                    llvm::MDNode::get(ctx, irs.linkerOptions));
-  } else {
-    // Merge the Linker Options with the pre-existing one
-    // (this can happen when passing a .bc file on the commandline)
-
-    auto *moduleFlags = M.getModuleFlagsMetadata();
-    for (unsigned i = 0, e = moduleFlags->getNumOperands(); i < e; ++i) {
-      auto *flag = moduleFlags->getOperand(i);
-      if (flag->getNumOperands() < 3)
-        continue;
-      auto optionsMDString =
-          llvm::dyn_cast_or_null<llvm::MDString>(flag->getOperand(1));
-      if (!optionsMDString || optionsMDString->getString() != "Linker Options")
-        continue;
-
-      // If we reach here, we found the Linker Options flag.
-
-      // Add the old Linker Options to our linkerOptions list.
-      auto *oldLinkerOptions = llvm::cast<llvm::MDNode>(flag->getOperand(2));
-      for (const auto &Option : oldLinkerOptions->operands()) {
-        irs.linkerOptions.push_back(Option);
-      }
-
-      // Replace Linker Options with a newly created list.
-      llvm::Metadata *Ops[3] = {
-          llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
-              llvm::Type::getInt32Ty(ctx), llvm::Module::AppendUnique)),
-          llvm::MDString::get(ctx, "Linker Options"),
-          llvm::MDNode::get(ctx, irs.linkerOptions)};
-      moduleFlags->setOperand(i, llvm::MDNode::get(ctx, Ops));
-
-      break;
-    }
-  }
-}
-#else
 void addLinkerMetadata(llvm::Module &M, const char *name,
                        llvm::ArrayRef<llvm::MDNode *> newOperands) {
   if (newOperands.empty())
@@ -202,7 +168,6 @@ void emitLinkerOptions(IRState &irs) {
   addLinkerMetadata(M, "llvm.linker.options", irs.linkerOptions);
   addLinkerMetadata(M, "llvm.dependent-libraries", irs.linkerDependentLibs);
 }
-#endif
 
 void emitLLVMUsedArray(IRState &irs) {
   if (irs.usedArray.empty()) {
@@ -266,7 +231,7 @@ CodeGenerator::CodeGenerator(llvm::LLVMContext &context,
 }
 
 CodeGenerator::~CodeGenerator() {
-  if (singleObj_) {
+  if (singleObj_ && moduleCount_ > 0) {
     // For singleObj builds, the first object file name is the one for the first
     // source file (e.g., `b.o` for `ldc2 a.o b.d c.d`).
     const char *filename = global.params.objfiles[0];

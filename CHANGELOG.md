@@ -1,3 +1,132 @@
+# LDC 1.25.0 (2021-02-21)
+
+#### Big news
+- Frontend, druntime and Phobos are at version [2.095.1](https://dlang.org/changelog/2.095.0.html), incl. new command-line option `-makedeps`. (#3620, #3658, #3668)
+- Support for **LLVM 12** and LLVM 11.1. (#3663, ldc-developers/druntime#195)
+- LLVM for prebuilt packages bumped to v11.0.1. (#3639)
+- New prebuilt package for **native macOS/arm64** ('Apple silicon'). (#3666)
+- LDC invocations can now be nicely profiled via `--ftime-trace`. (#3624)
+- Struct TypeInfos are emitted into *referencing* object files only, and special TypeInfo member functions into the owning object file only. (#3491)
+- Windows:
+  - New CI-automated [Windows installer](https://github.com/ldc-developers/ldc/releases/download/v1.25.0/ldc2-1.25.0-windows-multilib.exe) corresponding to the multilib package. (#3601)
+  - Bundled MinGW-based libs bumped to MinGW-w64 v8.0.0. (#3605)
+  - Bundled libcurl upgraded to v7.74.0. (#3638)
+  - Breaking ABI changes:
+    - `extern(D)`: Pass non-PODs by ref to temporary. (#3612)
+    - Win64: Pass/return delegates like slices - in (up to) 2 GP registers. (#3609)
+    - Win64 `extern(D)`: Pass/return Homogeneous Vector Aggregates in SIMD registers. (#3610)
+- `-linkonce-templates` comes with a new experimental template emission scheme and is now suited for projects consisting of multiple object files too. It's similar to C++, emitting templated symbols into *each* referencing compilation unit with optimizer-discardable `linkonce_odr` linkage. The consequences are manifold - each object file is self-sufficient wrt. templated symbols, naturally working around any template-culling bugs and also meaning increased opportunity for inlining and less need for LTO.
+  The probably biggest advantage is that the optimizer can discard unused `linkonce_odr` symbols early instead of optimizing and forwarding to the assembler. So this is especially useful to **decrease compilation times with `-O`** and can at least in some scenarios greatly outweigh the (potentially very much) higher number of symbols defined by the glue layer - on my box, building optimized dub (all-at-once) is 28% faster with `-linkonce-templates`, and building the optimized Phobos unittests (per module) 56% faster.
+  Libraries compiled with `-linkonce-templates` can generally *not* be linked against dependent code compiled without `-linkonce-templates`; the other way around works. (#3600)
+- Emit function/delegate literals as `linkonce_odr`, as they are emitted into each referencing compilation unit too. (#3650)
+- Exploit ABI specifics with `-preview=in`. (#3578)
+- Musl: Switch to cherry-picked libunwind-based backtrace alternative. (#3641, ldc-developers/druntime#192)
+
+#### Platform support
+- Supports LLVM 6.0 - 12.0.
+
+#### Bug fixes
+- Fix LTO with `-link-internally`. The prebuilt Windows packages don't bundle an external `lld-link.exe` LLD linker anymore. (#2657, #3604)
+- Add source location information for `TypeInfo` diagnostics with `-betterC`. (#3631, #3632)
+- Keep init symbols of built-in `TypeInfo` classes mutable just like any other TypeInfo, so that e.g. `synchronized()` can be used on the implicit monitor. (#3599)
+- Windows: Fix colliding EH TypeDescriptors for exceptions with the same `TypeInfo_Class` name. (#3501, #3614)
+- Predefine version `FreeStanding` when targeting bare-metal. (#3607, #3608)
+- druntime: Define `rt.aaA.AA` as naked pointer, no struct wrapper. (#3613)
+- Misc. fixes and improvements for the CMake scripts, incl. new defaults for `LDC_INSTALL_{LTOPLUGIN,LLVM_RUNTIME_LIBS}`. (#3647, #3655, #3654, #3673)
+- `-cleanup-obj`: Put object files into unique temporary directory by default. (#3643, #3660)
+- druntime: Add missing `core.atomic.atomicFetch{Add,Sub}`. (#3646, ldc-developers/druntime#193)
+- Fix regression wrt. non-deleted temporary `-run` executable. (#3636)
+
+#### Internals
+- Ignore `-enable-cross-module-inlining` if inlining is generally disabled. (#3664)
+- Travis CI ported to GitHub Actions (excl. Linux/AArch64). (#3661, #3662)
+
+# LDC 1.24.0 (2020-10-24)
+
+#### Big news
+- Frontend, druntime and Phobos are at version [2.094.1+](https://dlang.org/changelog/2.094.0.html), incl. new command-line options `-cov=ctfe`,  `-vtemplates=list-instances` and `-HC=<silent|verbose>` . (#3560, #3582, #3588, #3593)
+- Support for **LLVM 11**. The prebuilt packages use v11.0.0; x86 packages newly include the LLVM backend for AMD GPUs. (#3546, #3586)
+- Experimental support for **macOS on 64-bit ARM**, thanks Guillaume! All druntime/Phobos unit tests pass. The macOS package includes prebuilt druntime/Phobos; adapt the SDK path in `etc/ldc2.conf` and then use `-mtriple=arm64-apple-macos` to cross-compile. (dlang/druntime#3226, #3583)
+
+#### Platform support
+- Supports LLVM 6.0 - 11.0.
+
+#### Bug fixes
+- Fix potentially wrong context pointers when calling delegate literals. (#3553, #3554)
+- Fix alignment issue when casting vector rvalue to static array. (c8889a9219)
+- Make sure lambdas in `pragma(inline, true)` functions are emitted into each referencing compilation unit. (#3570)
+- Fix `-Xcc=-Wl,...` by dropping support for comma-separated list of `cc` options. (c61b1357ed)
+- Fix ThreadSanitizer support by not detaching main thread upon program termination. (#3572)
+- Traverse full chain of nested aggregates when resolving a nested variable. (#3556, #3558)
+
+#### Internals
+- CI: Linux AArch64 is now also tested by a Travis job, because Shippable has sadly become unreliable. (#3469)
+- Building LDC with an LDC host compiler might be somewhat faster now (requires `-DLDC_LINK_MANUALLY=OFF` in the CMake command-line on non-Windows hosts). (#3575)
+
+# LDC 1.23.0 (2020-08-19)
+
+#### Big news
+- Frontend, druntime and Phobos are at version [2.093.1+](https://dlang.org/changelog/2.093.0.html), incl. new command-line option `-vtemplates`. (#3476, #3538, #3541)
+- Min required LLVM version raised to v6.0, dropping support for v3.9-5.0. (#3493)
+- LLVM for prebuilt packages bumped to v10.0.1. (#3513)
+- The prebuilt Mac package now also includes prebuilt druntime/Phobos for the iOS/x86_64 simulator, making cross-compilation work out of the box with `-mtriple=x86_64-apple-ios12.0`. (#3478)
+- Windows: New `-gdwarf` CLI option to emit DWARF debuginfos for MSVC targets, e.g., for debugging with gdb/lldb. (#3533)
+- New `-platformlib` CLI option to override the default linked-with platform libraries, e.g., when targeting bare-metal. (#3374, #3475)
+
+#### Platform support
+- Supports LLVM 6.0 - 10.0.
+
+#### Bug fixes
+- Fix regression since v1.22: shared druntime potentially overriding libstdc++ symbols and breaking exceptions in C++ libraries. (#3530, #3537)
+- Fix naked DMD-style asm emission for non-Mac x86 Darwin targets (e.g., iOS simulators). (#3478)
+- `-betterC`: Don't use unsupported EH for handling clean-ups. (#3479, #3482)
+- dcompute: Fix wrong address space loads and stores. Thx Rob! (#3428)
+- Fix ICE wrt. missing IR declarations for some forward-declared functions. (#3496, #3503)
+- Fix ICE wrt. inline IR and empty parameter types tuple. (#3509)
+- Fix PGO issues. (#3375, #3511, #3512, #3524)
+- Improve support for LLVM's ThreadSanitizer. (#3522)
+- Fix linker cmdline length limitation via response files. (#3535, #3536)
+
+#### Internals
+- Compiler performance wrt. string literals emission has been improved. Thx @looked-at-me! (#3490, #3492)
+- Link libstdc++ statically for `libldc-jit.so` of prebuilt Linux packages, to increase portability. (#3473, #3474)
+- Set up Visual D when using the Visual Studio CMake generator, making LDC compiler development on Windows a smooth out-of-the-box experience. (#3494)
+
+# LDC 1.22.0 (2020-06-16)
+
+#### Big news
+- Frontend, druntime and Phobos are at version [2.092.1+](https://dlang.org/changelog/2.092.0.html). (#3413, #3416, #3429, #3434, #3452, #3467)
+- **AArch64**: All known ABI issues have been fixed. C(++) interop should now be on par with x86_64, and variadics usable with `core.{vararg,stdc.stdarg}`. (#3421)
+- Windows hosts: DMD's Visual C++ toolchain detection has been adopted. As that's orders of magnitude faster than the previous method involving the MS batch file, auto-detection has been enabled by default, so if you have a non-ancient Visual C++ installation, it will now be used automatically for linking. The environment setup has been reduced to the bare minimum (`LIB` and `PATH`). (#3415)
+- **FreeBSD** x64: CI with CirrusCI is now fully green and includes automated prebuilt package generation. The package depends on the `llvm` ports package and should currently work on FreeBSD 11-13. (#3453, #3464)
+- Link-time overridable `@weak` functions are now emulated for Windows targets and work properly for ELF platforms. For ELF, LDC doesn't emit any COMDATs anymore. (#3424)
+- New `ldc.gccbuiltins_{amdgcn,nvvm}` for AMD GCN and NVIDIA PTX targets. (#3411)
+- druntime: Significant speed-up for `core.math.ldexp`. (#3440, #3446)
+
+#### Platform support
+- Supports LLVM 3.9 - 10.0.
+
+#### Bug fixes
+- Cross-module inlining (incl. `pragma(inline, true)`): Enable emission into multiple object files. This may have a significant impact on performance (incl. druntime/Phobos) when not using LTO. (#3126, #3442)
+- Android: Fix TLS initialization regression (introduced in v1.21) and potential alignment issues. Unfortunately, the `ld.bfd` linker is required for our custom TLS emulation scheme, unless you're willing to use a custom linker script. So `-linker=bfd` is the new default for Android targets. (#3462)
+- Casting (static and dynamic) arrays to vectors now loads the data instead of splatting the first element. (#3418, #3419)
+- Fix return statements potentially accessing memory from destructed temporaries. (#3426)
+- Add proper support for `-checkaction=halt`. (#3430, #3431)
+- druntime: Include `core.stdcpp.*` modules. (#3103, #3158)
+- GCC-style asm: Add support for indirect input operands (`"m"`). (#3438)
+- FreeBSD: Fix backtraces for optimized code by switching to external `libexecinfo`. (#3108, #3453)
+- FreeBSD: Fix C math related issues (incl. CTFE math issues) by bringing `core.stdc.{math,tgmath}` up to speed. (dlang/druntime#3119)
+- Fix ICE for captured parameters not passed on the LLVM level. (#3441)
+- Convenience fixes for RISC-V and other exotic targets. (#3457, #3460)
+
+#### Internals
+- When printing compile-time reals to hex strings (mangling, .di headers), LDC now uses LLVM instead of the host C runtime, for proper and consistent results. (#3410)
+- One limitation for exotic hosts wrt. C `long double` precision has been lifted. (#3414)
+- For AVR targets, the compiler now predefines `AVR` and emits all TLS globals as regular `__gshared` ones. (#3420)
+- WebAssembly: New memory grow/size intrinsics. (ldc-developers/druntime#187)
+- New `-fno-plt` option to avoid PLT external calls. (#3443)
+- iOS/arm64 CI, running the debug druntime & Phobos unittests on an iPhone 6S. Thx Jacob for this tedious work! (#3379, #3450)
+
 # LDC 1.21.0 (2020-04-23)
 
 #### Big news

@@ -23,6 +23,7 @@
 #include "dmd/target.h"
 #include "dmd/template.h"
 #include "driver/cl_options_instrumentation.h"
+#include "driver/timetrace.h"
 #include "gen/abi.h"
 #include "gen/arrays.h"
 #include "gen/functions.h"
@@ -81,19 +82,6 @@ void Module::checkAndAddOutputFile(const FileName &file) {
   files.emplace(std::move(key), this);
 }
 
-void Module::makeObjectFilenameUnique() {
-  assert(objfile.toChars());
-
-  const char *ext = FileName::ext(objfile.toChars());
-  const char *stem = FileName::removeExt(objfile.toChars());
-
-  llvm::SmallString<128> unique;
-  auto EC = llvm::sys::fs::createUniqueFile(
-      llvm::Twine(stem) + "-%%%%%%%." + ext, unique);
-  if (!EC) // success
-    objfile.reset(unique.c_str());
-}
-
 namespace {
 /// Ways the druntime module registry system can be implemented.
 enum class RegistryStyle {
@@ -121,11 +109,7 @@ RegistryStyle getModuleRegistryStyle() {
   const auto &t = *global.params.targetTriple;
 
   if (t.isWindowsMSVCEnvironment() ||
-      t.getEnvironment() == llvm::Triple::Android
-#if LDC_LLVM_VER >= 500
-      || t.isOSBinFormatWasm()
-#endif
-  ) {
+      t.getEnvironment() == llvm::Triple::Android || t.isOSBinFormatWasm()) {
     return RegistryStyle::sectionSimple;
   }
 
@@ -185,7 +169,7 @@ LLFunction *build_module_reference_and_ctor(const char *moduleMangle,
   // linked list
   LLFunction *ctor =
       LLFunction::Create(fty, LLGlobalValue::InternalLinkage,
-                         getIRMangledFuncName(fname, LINKd), &gIR->module);
+                         getIRMangledFuncName(fname, LINK::d), &gIR->module);
 
   // provide the default initializer
   LLStructType *modulerefTy = DtoModuleReferenceType();
@@ -202,7 +186,7 @@ LLFunction *build_module_reference_and_ctor(const char *moduleMangle,
       defineGlobal(Loc(), gIR->module, thismrefIRMangle, thismrefinit,
                    LLGlobalValue::InternalLinkage, false);
   // make sure _Dmodule_ref is declared
-  const auto mrefIRMangle = getIRMangledVarName("_Dmodule_ref", LINKc);
+  const auto mrefIRMangle = getIRMangledVarName("_Dmodule_ref", LINK::c);
   LLConstant *mref = gIR->module.getNamedGlobal(mrefIRMangle);
   LLType *modulerefPtrTy = getPtrToType(modulerefTy);
   if (!mref) {
@@ -443,16 +427,22 @@ void addCoverageAnalysis(Module *m) {
 
     LLArrayType *type =
         LLArrayType::get(LLType::getInt32Ty(gIR->context()), m->numlines);
-    llvm::ConstantAggregateZero *zeroinitializer =
-        llvm::ConstantAggregateZero::get(type);
-    m->d_cover_data = new llvm::GlobalVariable(
-        gIR->module, type, false, LLGlobalValue::InternalLinkage,
-        zeroinitializer, "_d_cover_data");
-    LLConstant *idxs[] = {DtoConstUint(0), DtoConstUint(0)};
-    d_cover_data_slice =
-        DtoConstSlice(DtoConstSize_t(type->getArrayNumElements()),
-                      llvm::ConstantExpr::getGetElementPtr(
-                          type, m->d_cover_data, idxs, true));
+
+    llvm::Constant *init;
+    if (!m->ctfe_cov) {
+      init = llvm::ConstantAggregateZero::get(type);
+    } else {
+      std::vector<unsigned> initData(m->numlines);
+      m->initCoverageDataWithCtfeCoverage(initData.data());
+      init = llvm::ConstantDataArray::get(gIR->context(), initData);
+    }
+
+    m->d_cover_data = new llvm::GlobalVariable(gIR->module, type, false,
+                                               LLGlobalValue::InternalLinkage,
+                                               init, "_d_cover_data");
+
+    d_cover_data_slice = DtoConstSlice(DtoConstSize_t(m->numlines),
+                                       DtoGEP(m->d_cover_data, 0, 0));
   }
 
   // Create "static constructor" that calls _d_cover_register2(string filename,
@@ -473,8 +463,8 @@ void addCoverageAnalysis(Module *m) {
         LLFunctionType::get(LLType::getVoidTy(gIR->context()), {}, false);
     ctor =
         LLFunction::Create(ctorTy, LLGlobalValue::InternalLinkage,
-                           getIRMangledFuncName(ctorname, LINKd), &gIR->module);
-    ctor->setCallingConv(gABI->callingConv(LINKd));
+                           getIRMangledFuncName(ctorname, LINK::d), &gIR->module);
+    ctor->setCallingConv(gABI->callingConv(LINK::d));
     // Set function attributes. See functions.cpp:DtoDefineFunction()
     if (global.params.targetTriple->getArch() == llvm::Triple::x86_64) {
       ctor->addFnAttr(LLAttribute::UWTable);
@@ -586,6 +576,8 @@ void registerModuleInfo(Module *m) {
 }
 
 void codegenModule(IRState *irs, Module *m) {
+  TimeTraceScope timeScope("Generate IR", llvm::StringRef(m->toChars()));
+
   assert(!irs->dmodule &&
          "irs->module not null, codegen already in progress?!");
   irs->dmodule = m;
@@ -609,7 +601,7 @@ void codegenModule(IRState *irs, Module *m) {
 
   // process module members
   // NOTE: m->members may grow during codegen
-  for (unsigned k = 0; k < m->members->length; k++) {
+  for (d_size_t k = 0; k < m->members->length; k++) {
     Dsymbol *dsym = (*m->members)[k];
     assert(dsym);
     Declaration_codegen(dsym);

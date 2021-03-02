@@ -325,7 +325,6 @@ public:
         case LINK.c:        return property(name, "c");
         case LINK.cpp:      return property(name, "cpp");
         case LINK.windows:  return property(name, "windows");
-        case LINK.pascal:   return property(name, "pascal");
         case LINK.objc:     return property(name, "objc");
         }
     }
@@ -827,36 +826,37 @@ public:
     */
     private void generateCompilerInfo()
     {
+        import dmd.target : target;
         objectStart();
         requiredProperty("vendor", global.vendor);
-        requiredProperty("version", global._version);
+        requiredProperty("version", global.versionString());
         property("__VERSION__", global.versionNumber());
         requiredProperty("interface", determineCompilerInterface());
         property("size_t", size_t.sizeof);
         propertyStart("platforms");
         arrayStart();
-        if (global.params.isWindows)
+        if (global.params.targetOS == TargetOS.Windows)
         {
             item("windows");
         }
         else
         {
             item("posix");
-            if (global.params.isLinux)
+            if (global.params.targetOS == TargetOS.linux)
                 item("linux");
-            else if (global.params.isOSX)
+            else if (global.params.targetOS == TargetOS.OSX)
                 item("osx");
-            else if (global.params.isFreeBSD)
+            else if (global.params.targetOS == TargetOS.FreeBSD)
             {
                 item("freebsd");
                 item("bsd");
             }
-            else if (global.params.isOpenBSD)
+            else if (global.params.targetOS == TargetOS.OpenBSD)
             {
                 item("openbsd");
                 item("bsd");
             }
-            else if (global.params.isSolaris)
+            else if (global.params.targetOS == TargetOS.Solaris)
             {
                 item("solaris");
                 item("bsd");
@@ -866,10 +866,7 @@ public:
 
         propertyStart("architectures");
         arrayStart();
-        if (global.params.is64bit)
-            item("x86_64");
-        else
-            version(X86) item("x86");
+        item(target.architectureName);
         arrayEnd();
 
         propertyStart("predefinedVersions");

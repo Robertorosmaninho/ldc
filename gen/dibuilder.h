@@ -55,13 +55,7 @@ using DISubroutineType = llvm::DISubroutineType *;
 using DISubprogram = llvm::DISubprogram *;
 using DIModule = llvm::DIModule *;
 using DICompileUnit = llvm::DICompileUnit *;
-#if LDC_LLVM_VER >= 400
-using DIFlagsType = llvm::DINode::DIFlags;
 using DIFlags = llvm::DINode::DIFlags;
-#else
-using DIFlagsType = unsigned;
-using DIFlags = llvm::DINode;
-#endif
 
 class DIBuilder {
   IRState *const IR;
@@ -69,8 +63,7 @@ class DIBuilder {
 
   DICompileUnit CUNode;
 
-  const bool isTargetMSVC;
-  const bool isTargetMSVCx64;
+  const bool emitCodeView;
   const bool emitColumnInfo;
 
   llvm::DenseMap<Declaration*, llvm::TypedTrackingMDRef<llvm::MDNode>> StaticDataMemberCache;
@@ -78,8 +71,6 @@ class DIBuilder {
   DICompileUnit GetCU() {
     return CUNode;
   }
-
-  Loc currentLoc;
 
 public:
   explicit DIBuilder(IRState *const IR);
@@ -121,18 +112,13 @@ public:
   /// \brief Emits debug info for function start
   void EmitFuncStart(FuncDeclaration *fd);
 
-  /// \brief Emits debug info for function end
-  void EmitFuncEnd(FuncDeclaration *fd);
-
   /// \brief Emits debug info for block start
-  void EmitBlockStart(Loc &loc);
+  void EmitBlockStart(const Loc &loc);
 
   /// \brief Emits debug info for block end
   void EmitBlockEnd();
 
-  Loc GetCurrentLoc() const;
-
-  void EmitStopPoint(Loc &loc);
+  void EmitStopPoint(const Loc &loc);
 
   void EmitValue(llvm::Value *val, VarDeclaration *vd);
 
@@ -166,7 +152,6 @@ public:
   void Finalize();
 
 private:
-  llvm::LLVMContext &getContext();
   DIScope GetSymbolScope(Dsymbol *s);
   DIScope GetCurrentScope();
   llvm::StringRef GetNameAndScope(Dsymbol *sym, DIScope &scope);
@@ -178,7 +163,7 @@ private:
                  llvm::SmallVector<llvm::Metadata *, 16> &elems);
   void AddStaticMembers(AggregateDeclaration *sd, ldc::DIFile file,
                  llvm::SmallVector<llvm::Metadata *, 16> &elems);
-  DIFile CreateFile(Loc &loc);
+  DIFile CreateFile(const Loc &loc);
   DIFile CreateFile();
   DIFile CreateFile(Dsymbol* decl);
   DIType CreateBasicType(Type *type);
@@ -196,7 +181,7 @@ private:
                               unsigned lineNo, DISubroutineType ty,
                               bool isLocalToUnit, bool isDefinition,
                               bool isOptimized, unsigned scopeLine,
-                              DIFlagsType flags);
+                              DIFlags flags);
   DIType CreateCompositeType(Type *type);
   DIType CreateArrayType(Type *type);
   DIType CreateSArrayType(Type *type);
@@ -221,11 +206,7 @@ public:
 
     uint64_t offset =
         gDataLayout->getStructLayout(type)->getElementOffset(index);
-#if LDC_LLVM_VER >= 500
     addr.push_back(llvm::dwarf::DW_OP_plus_uconst);
-#else
-    addr.push_back(llvm::dwarf::DW_OP_plus);
-#endif
     addr.push_back(offset);
   }
 

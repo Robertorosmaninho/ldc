@@ -32,7 +32,7 @@
 
 void DtoResolveStruct(StructDeclaration *sd) { DtoResolveStruct(sd, sd->loc); }
 
-void DtoResolveStruct(StructDeclaration *sd, Loc &callerLoc) {
+void DtoResolveStruct(StructDeclaration *sd, const Loc &callerLoc) {
   // Make sure to resolve each struct type exactly once.
   if (sd->ir->isResolved()) {
     return;
@@ -47,7 +47,7 @@ void DtoResolveStruct(StructDeclaration *sd, Loc &callerLoc) {
   DtoType(sd->type);
 
   // if it's a forward declaration, all bets are off. The type should be enough
-  if (sd->sizeok != SIZEOKdone) {
+  if (sd->sizeok != Sizeok::done) {
     error(callerLoc, "struct `%s.%s` unknown size", sd->getModule()->toChars(),
           sd->toChars());
     fatal();

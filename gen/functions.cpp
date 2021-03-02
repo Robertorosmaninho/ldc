@@ -25,6 +25,7 @@
 #include "driver/cl_options.h"
 #include "driver/cl_options_instrumentation.h"
 #include "driver/cl_options_sanitizers.h"
+#include "driver/timetrace.h"
 #include "gen/abi.h"
 #include "gen/arrays.h"
 #include "gen/classes.h"
@@ -93,7 +94,7 @@ llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
     newIrFty.ret = new IrFuncTyArg(Type::tint32, false);
   } else {
     Type *rt = f->next;
-    const bool byref = f->isref && rt->toBasetype()->ty != Tvoid;
+    const bool byref = f->isref() && rt->toBasetype()->ty != Tvoid;
     llvm::AttrBuilder attrs;
 
     if (abi->returnInArg(f, fd && fd->needThis())) {
@@ -133,8 +134,8 @@ llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
   }
 
   bool hasObjCSelector = false;
-  if (fd && fd->linkage == LINKobjc && thistype) {
-    if (fd->selector) {
+  if (fd && fd->linkage == LINK::objc && thistype) {
+    if (fd->objc.selector) {
       hasObjCSelector = true;
     } else if (fd->parent->isClassDeclaration()) {
       fd->error("Objective-C `@selector` is missing");
@@ -149,7 +150,7 @@ llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
   // Non-typesafe variadics (both C and D styles) are also variadics on the LLVM
   // level.
   const bool isLLVMVariadic = (f->parameterList.varargs == VARARGvariadic);
-  if (isLLVMVariadic && f->linkage == LINKd) {
+  if (isLLVMVariadic && f->linkage == LINK::d) {
     // Add extra `_arguments` parameter for D-style variadic functions.
     newIrFty.arg_arguments =
         new IrFuncTyArg(getTypeInfoType()->arrayOf(), false);
@@ -159,7 +160,7 @@ llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
   const size_t numExplicitDArgs = f->parameterList.length();
 
   // if this _Dmain() doesn't have an argument, we force it to have one
-  if (isMain && f->linkage != LINKc && numExplicitDArgs == 0) {
+  if (isMain && f->linkage != LINK::c && numExplicitDArgs == 0) {
     Type *mainargs = Type::tchar->arrayOf()->arrayOf();
     newIrFty.args.push_back(new IrFuncTyArg(mainargs, false));
     ++nextLLArgIdx;
@@ -177,7 +178,7 @@ llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
     if (arg->storageClass & STClazy) {
       // Lazy arguments are lowered to delegates.
       Logger::println("lazy param");
-      auto ltf = TypeFunction::create(nullptr, arg->type, VARARGnone, LINKd);
+      auto ltf = TypeFunction::create(nullptr, arg->type, VARARGnone, LINK::d);
       auto ltd = createTypeDelegate(ltf);
       loweredDType = merge(ltd);
     } else if (passPointer) {
@@ -402,10 +403,10 @@ void DtoResolveFunction(FuncDeclaration *fdecl, const bool willDeclare) {
         } else if (tempdecl->llvmInternal == LLVMinline_ir) {
           Logger::println("magic inline ir found");
           fdecl->llvmInternal = LLVMinline_ir;
-          fdecl->linkage = LINKc;
+          fdecl->linkage = LINK::c;
           Type *type = fdecl->type;
           assert(type->ty == Tfunction);
-          static_cast<TypeFunction *>(type)->linkage = LINKc;
+          static_cast<TypeFunction *>(type)->linkage = LINK::c;
 
           DtoFunctionType(fdecl);
           fdecl->ir->setDefined();
@@ -454,30 +455,33 @@ void applyParamAttrsToLLFunc(TypeFunction *f, IrFuncTy &irFty,
 /// does the same). See https://llvm.org/bugs/show_bug.cgi?id=23172
 void applyTargetMachineAttributes(llvm::Function &func,
                                   const llvm::TargetMachine &target) {
-  const llvm::TargetOptions &TO = target.Options;
+  const auto dcompute = gIR->dcomputetarget;
 
-  // TODO: implement commandline switches to change the default values.
   // TODO: (correctly) apply these for NVPTX (but not for SPIRV).
-  if (gIR->dcomputetarget && gIR->dcomputetarget->target == DComputeTarget::OpenCL)
+  if (dcompute && dcompute->target == DComputeTarget::OpenCL)
     return;
-  if (!gIR->dcomputetarget) {
-    // Target CPU capabilities
-    func.addFnAttr("target-cpu", target.getTargetCPU());
-    auto featStr = target.getTargetFeatureString();
-    if (!featStr.empty())
-      func.addFnAttr("target-features", featStr);
-  }
-  // Floating point settings
-  func.addFnAttr("unsafe-fp-math", TO.UnsafeFPMath ? "true" : "false");
-  const bool lessPreciseFPMADOption =
-#if LDC_LLVM_VER >= 500
-      // This option was removed from llvm::TargetOptions in LLVM 5.0.
-      // Clang sets this to true when `-cl-mad-enable` is passed (OpenCL only).
-      // TODO: implement interface for this option.
-      false;
+  const auto cpu = dcompute ? "" : target.getTargetCPU();
+  const auto features = dcompute ? "" : target.getTargetFeatureString();
+
+#if LDC_LLVM_VER >= 1000
+  opts::setFunctionAttributes(cpu, features, func);
+  if (opts::fFastMath) // -ffast-math[=true] overrides -enable-unsafe-fp-math
+    func.addFnAttr("unsafe-fp-math", "true");
+  if (!func.hasFnAttribute("frame-pointer")) // not explicitly set by user
+    func.addFnAttr("frame-pointer", isOptimizationEnabled() ? "none" : "all");
 #else
-      TO.LessPreciseFPMADOption;
-#endif
+  if (!cpu.empty())
+    func.addFnAttr("target-cpu", cpu);
+  if (!features.empty())
+    func.addFnAttr("target-features", features);
+
+  // Floating point settings
+  const auto &TO = target.Options;
+  func.addFnAttr("unsafe-fp-math", TO.UnsafeFPMath ? "true" : "false");
+  // This option was removed from llvm::TargetOptions in LLVM 5.0.
+  // Clang sets this to true when `-cl-mad-enable` is passed (OpenCL only).
+  // TODO: implement interface for this option.
+  const bool lessPreciseFPMADOption = false;
   func.addFnAttr("less-precise-fpmad",
                  lessPreciseFPMADOption ? "true" : "false");
   func.addFnAttr("no-infs-fp-math", TO.NoInfsFPMath ? "true" : "false");
@@ -495,10 +499,11 @@ void applyTargetMachineAttributes(llvm::Function &func,
       func.addFnAttr("frame-pointer", "all");
       break;
   }
-#else
+#else // LDC_LLVM_VER < 800
   func.addFnAttr("no-frame-pointer-elim",
                  willEliminateFramePointer() ? "false" : "true");
 #endif
+#endif // LDC_LLVM_VER < 1000
 }
 
 void applyXRayAttributes(FuncDeclaration &fdecl, llvm::Function &func) {
@@ -520,8 +525,9 @@ void onlyOneMainCheck(FuncDeclaration *fd) {
   // We'd actually want all possible main functions to be mutually exclusive.
   // Unfortunately, a D main implies a C main, so only check C mains with
   // -betterC.
+  const bool isOSWindows = global.params.targetTriple->isOSWindows();
   if (fd->isMain() || (global.params.betterC && fd->isCMain()) ||
-      (global.params.isWindows && (fd->isWinMain() || fd->isDllMain()))) {
+      (isOSWindows && (fd->isWinMain() || fd->isDllMain()))) {
     // global - across all modules compiled in this compiler invocation
     static Loc mainLoc;
     if (!mainLoc.filename) {
@@ -529,7 +535,7 @@ void onlyOneMainCheck(FuncDeclaration *fd) {
       assert(mainLoc.filename);
     } else {
       const char *otherMainNames =
-          global.params.isWindows ? ", `WinMain`, or `DllMain`" : "";
+          isOSWindows ? ", `WinMain`, or `DllMain`" : "";
       const char *mainSwitch =
           global.params.addMain ? ", -main switch added another `main()`" : "";
       error(fd->loc,
@@ -571,10 +577,27 @@ void DtoDeclareFunction(FuncDeclaration *fdecl, const bool willDefine) {
   // Check if fdecl should be defined too for cross-module inlining.
   // If true, semantic is fully done for fdecl which is needed for some code
   // below (e.g. code that uses fdecl->vthis).
-  const bool defineAtEnd = !willDefine && defineAsExternallyAvailable(*fdecl);
-  if (defineAtEnd) {
-    IF_LOG Logger::println(
-        "Function is an externally_available inline candidate.");
+  bool defineAtEnd = false;
+  bool defineAsAvailableExternally = false;
+  if (willDefine) {
+    // will be defined anyway after declaration
+  } else if (defineOnDeclare(fdecl)) {
+    Logger::println("Function is inside a linkonce_odr template, will be "
+                    "defined after declaration.");
+    if (fdecl->semanticRun < PASSsemantic3done) {
+      // this can e.g. happen for special __xtoHash member functions
+      Logger::println("Function hasn't had sema3 run yet, running it now.");
+      const bool semaSuccess = fdecl->functionSemantic3();
+      (void)semaSuccess;
+      assert(semaSuccess);
+      Module::runDeferredSemantic3();
+    }
+    defineAtEnd = true;
+  } else if (defineAsExternallyAvailable(*fdecl)) {
+    Logger::println("Function is an externally_available inline candidate, "
+                    "will be defined after declaration.");
+    defineAtEnd = true;
+    defineAsAvailableExternally = true;
   }
 
   // get TypeFunction*
@@ -595,7 +618,7 @@ void DtoDeclareFunction(FuncDeclaration *fdecl, const bool willDefine) {
   // hardcoded into druntime, even if the frontend type has D linkage (Bugzilla
   // issue 9028).
   const bool forceC = vafunc || DtoIsIntrinsic(fdecl) || fdecl->isMain();
-  const auto link = forceC ? LINKc : f->linkage;
+  const auto link = forceC ? LINK::c : f->linkage;
 
   // mangled name
   const auto irMangle = getIRMangledName(fdecl, link);
@@ -627,7 +650,7 @@ void DtoDeclareFunction(FuncDeclaration *fdecl, const bool willDefine) {
 
   func->setCallingConv(gABI->callingConv(link, f, fdecl));
 
-  if (global.params.isWindows && fdecl->isExport()) {
+  if (global.params.targetTriple->isOSWindows() && fdecl->isExport()) {
     func->setDLLStorageClass(fdecl->isImportedSymbol()
                                  ? LLGlobalValue::DLLImportStorageClass
                                  : LLGlobalValue::DLLExportStorageClass);
@@ -673,9 +696,9 @@ void DtoDeclareFunction(FuncDeclaration *fdecl, const bool willDefine) {
   if (fdecl->neverInline) {
     irFunc->setNeverInline();
   } else {
-    if (fdecl->inlining == PINLINEalways) {
+    if (fdecl->inlining == PINLINE::always) {
       irFunc->setAlwaysInline();
-    } else if (fdecl->inlining == PINLINEnever) {
+    } else if (fdecl->inlining == PINLINE::never) {
       irFunc->setNeverInline();
     }
   }
@@ -764,9 +787,8 @@ void DtoDeclareFunction(FuncDeclaration *fdecl, const bool willDefine) {
 
   // Now that this function is declared, also define it if needed.
   if (defineAtEnd) {
-    IF_LOG Logger::println(
-        "Function is an externally_available inline candidate: define it now.");
-    DtoDefineFunction(fdecl, /*linkageAvailableExternally=*/true);
+    IF_LOG Logger::println("Define function after declaration:");
+    DtoDefineFunction(fdecl, defineAsAvailableExternally);
   }
 }
 
@@ -888,12 +910,11 @@ void emitDMDStyleFunctionTrace(IRState &irs, FuncDeclaration *fd,
   // Push cleanup block that calls _c_trace_epi at function exit.
   {
     auto traceEpilogBB = irs.insertBB("trace_epi");
-    auto saveScope = irs.scope();
-    irs.scope() = IRScope(traceEpilogBB);
+    const auto savedInsertPoint = irs.saveInsertPoint();
+    irs.ir->SetInsertPoint(traceEpilogBB);
     irs.ir->CreateCall(
         getRuntimeFunction(fd->endloc, irs.module, "_c_trace_epi"));
     funcGen.scopes.pushCleanup(traceEpilogBB, irs.scopebb());
-    irs.scope() = saveScope;
   }
 }
 
@@ -931,13 +952,13 @@ void emulateWeakAnyLinkageForMSVC(LLFunction *func, LINK linkage) {
     finalMangle = mangleBuffer;
   }
 
-  std::string finalWeakMangle = finalMangle;
-  if (linkage == LINKcpp) {
+  std::string finalWeakMangle = finalMangle.str();
+  if (linkage == LINK::cpp) {
     assert(finalMangle.startswith("?"));
     // prepend `__weak_` to first identifier
     size_t offset = finalMangle.startswith("??$") ? 3 : 1;
     finalWeakMangle.insert(offset, "__weak_");
-  } else if (linkage == LINKd) {
+  } else if (linkage == LINK::d) {
     const size_t offset = isWin32 ? 1 : 0;
     assert(finalMangle.substr(offset).startswith("_D"));
     // prepend a `__weak` package
@@ -968,6 +989,14 @@ void emulateWeakAnyLinkageForMSVC(LLFunction *func, LINK linkage) {
 } // anonymous namespace
 
 void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
+  TimeTraceScope timeScope(
+      ("Codegen func " + llvm::SmallString<40>(fd->toChars())).str(), [fd]() {
+        std::string detail = fd->toPrettyChars();
+        detail += ", loc: ";
+        detail += fd->loc.toChars();
+        return detail;
+      });
+
   IF_LOG Logger::println("DtoDefineFunction(%s): %s", fd->toPrettyChars(),
                          fd->loc.toChars());
   LOG_SCOPE;
@@ -1035,7 +1064,7 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
     }
   }
 
-  if (!linkageAvailableExternally && !alreadyOrWillBeDefined(*fd)) {
+  if (!linkageAvailableExternally && skipCodegen(*fd)) {
     IF_LOG Logger::println("Skipping '%s'.", fd->toPrettyChars());
     return;
   }
@@ -1170,13 +1199,10 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
   llvm::BasicBlock *beginbb =
       llvm::BasicBlock::Create(gIR->context(), "", func);
 
-  gIR->scopes.push_back(IRScope(beginbb));
-  SCOPE_EXIT {
-    gIR->scopes.pop_back();
-  };
-
-  // Set the FastMath options for this function scope.
-  gIR->scopes.back().builder.setFastMathFlags(irFunc->FMF);
+  // set up the IRBuilder scope for the function
+  const auto savedIRBuilderScope = gIR->setInsertPoint(beginbb);
+  gIR->ir->setFastMathFlags(irFunc->FMF);
+  gIR->DBuilder.EmitFuncStart(fd);
 
   // @naked: emit body and return, no prologue/epilogue
   if (func->hasFnAttribute(llvm::Attribute::Naked)) {
@@ -1195,14 +1221,9 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
   // matter at all
   llvm::Instruction *allocaPoint =
       new llvm::AllocaInst(LLType::getInt32Ty(gIR->context()),
-#if LDC_LLVM_VER >= 500
                            0, // Address space
-#endif
                            "alloca_point", beginbb);
   funcGen.allocapoint = allocaPoint;
-
-  // debug info - after all allocas, but before any llvm.dbg.declare etc
-  gIR->DBuilder.EmitFuncStart(fd);
 
   emitInstrumentationFnEnter(fd);
 
@@ -1219,7 +1240,7 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
         llvm::Attribute::get(gIR->context(), "frame-pointer", "all"));
 #else
     func->addAttribute(
-        LLAttributeSet::FunctionIndex,
+        LLAttributeList::FunctionIndex,
         llvm::Attribute::get(gIR->context(), "no-frame-pointer-elim", "true"));
 #endif
   }
@@ -1284,11 +1305,10 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
     {
       auto *vaendBB =
           llvm::BasicBlock::Create(gIR->context(), "vaend", gIR->topfunc());
-      IRScope saveScope = gIR->scope();
-      gIR->scope() = IRScope(vaendBB);
+      const auto savedInsertPoint = gIR->saveInsertPoint();
+      gIR->ir->SetInsertPoint(vaendBB);
       gIR->ir->CreateCall(GET_INTRINSIC_DECL(vaend), llAp);
       funcGen.scopes.pushCleanup(vaendBB, gIR->scopebb());
-      gIR->scope() = saveScope;
     }
   }
 
@@ -1304,7 +1324,7 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
       if (!funcGen.retBlock)
         funcGen.retBlock = gIR->insertBB("return");
       funcGen.scopes.runCleanups(0, funcGen.retBlock);
-      gIR->scope() = IRScope(funcGen.retBlock);
+      gIR->ir->SetInsertPoint(funcGen.retBlock);
     }
     funcGen.scopes.popCleanups(0);
   }
@@ -1329,7 +1349,6 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
       gIR->ir->CreateRet(llvm::UndefValue::get(func->getReturnType()));
     }
   }
-  gIR->DBuilder.EmitFuncEnd(fd);
 
   // erase alloca point
   if (allocaPoint->getParent()) {
@@ -1373,23 +1392,4 @@ DValue *DtoArgument(Parameter *fnarg, Expression *argexp) {
   }
 
   return arg;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-int binary(const char *p, const char **tab, int high) {
-  int i = 0, j = high, k, l;
-  do {
-    k = (i + j) / 2;
-    l = strcmp(p, tab[k]);
-    if (!l) {
-      return k;
-    }
-    if (l < 0) {
-      j = k;
-    } else {
-      i = k + 1;
-    }
-  } while (i != j);
-  return -1;
 }

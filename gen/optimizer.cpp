@@ -18,6 +18,7 @@
 #include "driver/cl_options_sanitizers.h"
 #include "driver/targetmachine.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/DataLayout.h"
@@ -31,9 +32,6 @@
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
-#if LDC_LLVM_VER >= 400
-#include "llvm/Analysis/InlineCost.h"
-#endif
 #if LDC_LLVM_VER >= 800
 #include "llvm/Transforms/Instrumentation/MemorySanitizer.h"
 #include "llvm/Transforms/Instrumentation/ThreadSanitizer.h"
@@ -55,7 +53,7 @@ using namespace llvm;
 
 static cl::opt<signed char> optimizeLevel(
     cl::desc("Setting the optimization level:"), cl::ZeroOrMore,
-    clEnumValues(
+    cl::values(
         clEnumValN(3, "O", "Equivalent to -O3"),
         clEnumValN(0, "O0", "No optimizations (default)"),
         clEnumValN(1, "O1", "Simple optimizations"),
@@ -137,17 +135,17 @@ bool willInline() {
 }
 
 bool willCrossModuleInline() {
-  return enableCrossModuleInlining == llvm::cl::BOU_TRUE;
+  return enableCrossModuleInlining == llvm::cl::BOU_TRUE && willInline();
 }
 
-#if LDC_LLVM_VER >= 800
+#if LDC_LLVM_VER >= 800 && LDC_LLVM_VER < 1000
 llvm::FramePointer::FP whichFramePointersToEmit() {
   if (auto option = opts::framePointerUsage())
     return *option;
   return isOptimizationEnabled() ? llvm::FramePointer::None
                                  : llvm::FramePointer::All;
 }
-#else
+#elif LDC_LLVM_VER < 800
 bool willEliminateFramePointer() {
   const llvm::cl::boolOrDefault disableFPElimEnum = opts::disableFPElim();
   return disableFPElimEnum == llvm::cl::BOU_FALSE ||
@@ -242,8 +240,6 @@ static void addThreadSanitizerPass(const PassManagerBuilder &Builder,
 
 static void addSanitizerCoveragePass(const PassManagerBuilder &Builder,
                                      legacy::PassManagerBase &PM) {
-#ifdef ENABLE_COVERAGE_SANITIZER
-
 #if LDC_LLVM_VER >= 1000
   PM.add(createModuleSanitizerCoverageLegacyPassPass(
       opts::getSanitizerCoverageOptions()));
@@ -254,9 +250,6 @@ static void addSanitizerCoveragePass(const PassManagerBuilder &Builder,
       createModuleSanitizerCoverageLegacyPassPass
 #else
       createSanitizerCoverageModulePass
-#endif
-         (opts::getSanitizerCoverageOptions()));
-#endif
 #endif
 }
 
@@ -270,18 +263,13 @@ static void addPGOPasses(PassManagerBuilder &builder,
       options.InstrProfileOutput = global.params.datafileInstrProf;
     mpm.add(createInstrProfilingLegacyPass(options));
   } else if (opts::isUsingASTBasedPGOProfile()) {
-// We are generating code with PGO profile information available.
-#if LDC_LLVM_VER >= 500
+    // We are generating code with PGO profile information available.
     // Do indirect call promotion from -O1
     if (optLevel > 0) {
       mpm.add(createPGOIndirectCallPromotionLegacyPass());
     }
-#endif
-  }
-  else if (opts::isInstrumentingForIRBasedPGO()) {
-#if LDC_LLVM_VER >= 400
+  } else if (opts::isInstrumentingForIRBasedPGO()) {
     builder.EnablePGOInstrGen = true;
-#endif
     builder.PGOInstrGen = global.params.datafileInstrProf;
   } else if (opts::isUsingIRBasedPGOProfile()) {
     builder.PGOInstrUse = global.params.datafileInstrProf;
@@ -309,18 +297,10 @@ static void addOptimizationPasses(legacy::PassManagerBase &mpm,
   builder.PrepareForThinLTO = opts::isUsingThinLTO();
 
   if (willInline()) {
-#if LDC_LLVM_VER >= 400
     auto params = llvm::getInlineParams(optLevel, sizeLevel);
     builder.Inliner = createFunctionInliningPass(params);
-#else
-    builder.Inliner = createFunctionInliningPass(optLevel, sizeLevel);
-#endif
   } else {
-#if LDC_LLVM_VER >= 400
     builder.Inliner = createAlwaysInlinerLegacyPass();
-#else
-    builder.Inliner = createAlwaysInlinerPass();
-#endif
   }
 
 #if LDC_LLVM_VER < 900

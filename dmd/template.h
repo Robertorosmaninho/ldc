@@ -66,6 +66,9 @@ public:
     bool literal;               // this template declaration is a literal
     bool ismixin;               // template declaration is only to be used as a mixin
     bool isstatic;              // this is static template declaration
+    bool isTrivialAliasSeq;     // matches `template AliasSeq(T...) { alias AliasSeq = T; }
+    bool isTrivialAlias;        // matches pattern `template Alias(T) { alias Alias = qualifiers(T); }`
+    bool deprecated_;           // this template declaration is deprecated
     Prot protection;
     int inuse;                  // for recursive expansion detection
 
@@ -89,6 +92,7 @@ public:
     TemplateDeclaration *isTemplateDeclaration() { return this; }
 
     TemplateTupleParameter *isVariadic();
+    bool isDeprecated() const;
     bool isOverloadable() const;
 
     void accept(Visitor *v) { v->visit(this); }
@@ -257,11 +261,6 @@ public:
     Dsymbol *aliasdecl;                 // !=NULL if instance is an alias for its sole member
     TemplateInstance *inst;             // refer to existing instance
     ScopeDsymbol *argsym;               // argument symbol table
-    int inuse;                          // for recursive expansion detection
-    int nest;                           // for recursive pretty printing detection
-    bool semantictiargsdone;            // has semanticTiargs() been done?
-    bool havetempdecl;                  // if used second constructor
-    bool gagged;                        // if the instantiation is done with error gagging
     hash_t hash;                        // cached result of toHash()
     Expressions *fargs;                 // for function template, these are the function arguments
 
@@ -275,13 +274,17 @@ public:
     TemplateInstance *tnext;            // non-first instantiated instances
     Module *minst;                      // the top module that instantiated this instance
 
+private:
+    unsigned short _nest;                // for recursive pretty printing detection, 3 MSBs reserved for flags
+public:
+    unsigned char inuse;                 // for recursive expansion detection
+
     Dsymbol *syntaxCopy(Dsymbol *);
     Dsymbol *toAlias();                 // resolve real symbol
     const char *kind() const;
     bool oneMember(Dsymbol **ps, Identifier *ident);
     const char *toChars() const;
     const char* toPrettyCharsHelper();
-    void printInstantiationTrace();
     Identifier *getIdent();
     hash_t toHash();
 

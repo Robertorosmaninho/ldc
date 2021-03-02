@@ -30,17 +30,12 @@
 #include "ir/irfunction.h"
 #include "ir/irtype.h"
 #include "ir/irtypefunction.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <algorithm>
-
-#if LDC_LLVM_VER >= 400
-#include "llvm/Bitcode/BitcodeWriter.h"
-#else
-#include "llvm/Bitcode/ReaderWriter.h"
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -110,10 +105,10 @@ static void checkForImplicitGCCall(const Loc &loc, const char *name) {
 ////////////////////////////////////////////////////////////////////////////////
 
 bool initRuntime() {
-  Logger::println("*** Initializing D runtime declarations ***");
-  LOG_SCOPE;
-
   if (!M) {
+    Logger::println("*** Initializing D runtime declarations ***");
+    LOG_SCOPE;
+
     buildRuntimeModule();
   }
 
@@ -263,9 +258,8 @@ struct LazyFunctionDeclarer {
     // the call to DtoType performs many actions such as rewriting the function
     // type and storing it in dty
     auto llfunctype = llvm::cast<llvm::FunctionType>(DtoType(dty));
-    assert(dty->ctype);
-    auto attrs =
-        dty->ctype->getIrFuncTy().getParamAttrs(gABI->passThisBeforeSret(dty));
+    auto attrs = getIrType(dty)->getIrFuncTy().getParamAttrs(
+        gABI->passThisBeforeSret(dty));
     attrs.merge(attributes);
 
     for (auto fname : mangledFunctionNames) {
@@ -456,7 +450,7 @@ static Type *rt_dg1() {
 
   auto params = new Parameters();
   params->push(Parameter::create(0, Type::tvoidptr, nullptr, nullptr, nullptr));
-  auto fty = TypeFunction::create(params, Type::tint32, VARARGnone, LINKd);
+  auto fty = TypeFunction::create(params, Type::tint32, VARARGnone, LINK::d);
   dg_t = createTypeDelegate(fty);
   return dg_t;
 }
@@ -470,7 +464,7 @@ static Type *rt_dg2() {
   auto params = new Parameters();
   params->push(Parameter::create(0, Type::tvoidptr, nullptr, nullptr, nullptr));
   params->push(Parameter::create(0, Type::tvoidptr, nullptr, nullptr, nullptr));
-  auto fty = TypeFunction::create(params, Type::tint32, VARARGnone, LINKd);
+  auto fty = TypeFunction::create(params, Type::tint32, VARARGnone, LINK::d);
   dg2_t = createTypeDelegate(fty);
   return dg2_t;
 }
@@ -495,7 +489,7 @@ static void buildRuntimeModule() {
   Type *wstringTy = Type::twchar->arrayOf();
   Type *dstringTy = Type::tdchar->arrayOf();
 
-  // The AA type is a struct that only contains a ptr
+  // LDC's AA type is rt.aaA.Impl*; use void* for the prototypes
   Type *aaTy = voidPtrTy;
 
   //////////////////////////////////////////////////////////////////////////////
@@ -504,43 +498,39 @@ static void buildRuntimeModule() {
 
   // Construct some attribute lists used below (possibly multiple times)
   AttrSet NoAttrs,
-      Attr_NoAlias(NoAttrs, LLAttributeSet::ReturnIndex,
+      Attr_NoAlias(NoAttrs, LLAttributeList::ReturnIndex,
                    llvm::Attribute::NoAlias),
-      Attr_NoUnwind(NoAttrs, LLAttributeSet::FunctionIndex,
+      Attr_NoUnwind(NoAttrs, LLAttributeList::FunctionIndex,
                     llvm::Attribute::NoUnwind),
-      Attr_ReadOnly(NoAttrs, LLAttributeSet::FunctionIndex,
+      Attr_ReadOnly(NoAttrs, LLAttributeList::FunctionIndex,
                     llvm::Attribute::ReadOnly),
-      Attr_Cold(NoAttrs, LLAttributeSet::FunctionIndex, llvm::Attribute::Cold),
-      Attr_Cold_NoReturn(Attr_Cold, LLAttributeSet::FunctionIndex,
+      Attr_Cold(NoAttrs, LLAttributeList::FunctionIndex, llvm::Attribute::Cold),
+      Attr_Cold_NoReturn(Attr_Cold, LLAttributeList::FunctionIndex,
                          llvm::Attribute::NoReturn),
       Attr_Cold_NoReturn_NoUnwind(Attr_Cold_NoReturn,
-                                  LLAttributeSet::FunctionIndex,
+                                  LLAttributeList::FunctionIndex,
                                   llvm::Attribute::NoUnwind),
-      Attr_ReadOnly_NoUnwind(Attr_ReadOnly, LLAttributeSet::FunctionIndex,
+      Attr_ReadOnly_NoUnwind(Attr_ReadOnly, LLAttributeList::FunctionIndex,
                              llvm::Attribute::NoUnwind),
-      Attr_ReadOnly_1_NoCapture(Attr_ReadOnly, AttrSet::FirstArgIndex,
+      Attr_ReadOnly_1_NoCapture(Attr_ReadOnly, LLAttributeList::FirstArgIndex,
                                 llvm::Attribute::NoCapture),
       Attr_ReadOnly_1_3_NoCapture(Attr_ReadOnly_1_NoCapture,
-                                  AttrSet::FirstArgIndex + 2,
+                                  LLAttributeList::FirstArgIndex + 2,
                                   llvm::Attribute::NoCapture),
       Attr_ReadOnly_NoUnwind_1_NoCapture(Attr_ReadOnly_1_NoCapture,
-                                         LLAttributeSet::FunctionIndex,
+                                         LLAttributeList::FunctionIndex,
                                          llvm::Attribute::NoUnwind),
       Attr_ReadOnly_NoUnwind_1_2_NoCapture(Attr_ReadOnly_NoUnwind_1_NoCapture,
-                                           AttrSet::FirstArgIndex + 1,
+                                           LLAttributeList::FirstArgIndex + 1,
                                            llvm::Attribute::NoCapture),
-      Attr_ReadNone(NoAttrs, LLAttributeSet::FunctionIndex,
-                    llvm::Attribute::ReadNone),
-      Attr_1_NoCapture(NoAttrs, AttrSet::FirstArgIndex,
+      Attr_1_NoCapture(NoAttrs, LLAttributeList::FirstArgIndex,
                        llvm::Attribute::NoCapture),
-      Attr_1_2_NoCapture(Attr_1_NoCapture, AttrSet::FirstArgIndex + 1,
+      Attr_1_2_NoCapture(Attr_1_NoCapture, LLAttributeList::FirstArgIndex + 1,
                          llvm::Attribute::NoCapture),
-      Attr_1_3_NoCapture(Attr_1_NoCapture, AttrSet::FirstArgIndex + 2,
+      Attr_1_3_NoCapture(Attr_1_NoCapture, LLAttributeList::FirstArgIndex + 2,
                          llvm::Attribute::NoCapture),
-      Attr_1_4_NoCapture(Attr_1_NoCapture, AttrSet::FirstArgIndex + 3,
-                         llvm::Attribute::NoCapture),
-      Attr_NoAlias_1_NoCapture(Attr_1_NoCapture, LLAttributeSet::ReturnIndex,
-                               llvm::Attribute::NoAlias);
+      Attr_1_4_NoCapture(Attr_1_NoCapture, LLAttributeList::FirstArgIndex + 3,
+                         llvm::Attribute::NoCapture);
 
   //////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////
@@ -548,7 +538,7 @@ static void buildRuntimeModule() {
 
   // void __cyg_profile_func_enter(void *callee, void *caller)
   // void __cyg_profile_func_exit(void *callee, void *caller)
-  createFwdDecl(LINKc, voidTy,
+  createFwdDecl(LINK::c, voidTy,
                 {"__cyg_profile_func_exit", "__cyg_profile_func_enter"},
                 {voidPtrTy, voidPtrTy}, {}, Attr_NoUnwind);
 
@@ -557,17 +547,17 @@ static void buildRuntimeModule() {
   //////////////////////////////////////////////////////////////////////////////
 
   // C assert function
-  createFwdDecl(LINKc, Type::tvoid, {getCAssertFunctionName()},
+  createFwdDecl(LINK::c, Type::tvoid, {getCAssertFunctionName()},
                 getCAssertFunctionParamTypes(), {},
                 Attr_Cold_NoReturn_NoUnwind);
 
   // void _d_assert(string file, uint line)
   // void _d_arraybounds(string file, uint line)
-  createFwdDecl(LINKc, Type::tvoid, {"_d_assert", "_d_arraybounds"},
+  createFwdDecl(LINK::c, Type::tvoid, {"_d_assert", "_d_arraybounds"},
                 {stringTy, uintTy}, {}, Attr_Cold_NoReturn);
 
   // void _d_assert_msg(string msg, string file, uint line)
-  createFwdDecl(LINKc, voidTy, {"_d_assert_msg"}, {stringTy, stringTy, uintTy},
+  createFwdDecl(LINK::c, voidTy, {"_d_assert_msg"}, {stringTy, stringTy, uintTy},
                 {}, Attr_Cold_NoReturn);
 
   //////////////////////////////////////////////////////////////////////////////
@@ -575,83 +565,83 @@ static void buildRuntimeModule() {
   //////////////////////////////////////////////////////////////////////////////
 
   // void* _d_allocmemory(size_t sz)
-  createFwdDecl(LINKc, voidPtrTy, {"_d_allocmemory"}, {sizeTy}, {},
+  createFwdDecl(LINK::c, voidPtrTy, {"_d_allocmemory"}, {sizeTy}, {},
                 Attr_NoAlias);
 
   // void* _d_allocmemoryT(TypeInfo ti)
-  createFwdDecl(LINKc, voidPtrTy, {"_d_allocmemoryT"}, {typeInfoTy}, {},
+  createFwdDecl(LINK::c, voidPtrTy, {"_d_allocmemoryT"}, {typeInfoTy}, {},
                 Attr_NoAlias);
 
   // void[] _d_newarrayT (const TypeInfo ti, size_t length)
   // void[] _d_newarrayiT(const TypeInfo ti, size_t length)
   // void[] _d_newarrayU (const TypeInfo ti, size_t length)
-  createFwdDecl(LINKc, voidArrayTy,
+  createFwdDecl(LINK::c, voidArrayTy,
                 {"_d_newarrayT", "_d_newarrayiT", "_d_newarrayU"},
                 {typeInfoTy, sizeTy}, {STCconst, 0});
 
   // void[] _d_newarraymTX (const TypeInfo ti, size_t[] dims)
   // void[] _d_newarraymiTX(const TypeInfo ti, size_t[] dims)
-  createFwdDecl(LINKc, voidArrayTy, {"_d_newarraymTX", "_d_newarraymiTX"},
+  createFwdDecl(LINK::c, voidArrayTy, {"_d_newarraymTX", "_d_newarraymiTX"},
                 {typeInfoTy, sizeTy->arrayOf()}, {STCconst, 0});
 
   // void[] _d_arraysetlengthT (const TypeInfo ti, size_t newlength, void[]* p)
   // void[] _d_arraysetlengthiT(const TypeInfo ti, size_t newlength, void[]* p)
-  createFwdDecl(LINKc, voidArrayTy,
+  createFwdDecl(LINK::c, voidArrayTy,
                 {"_d_arraysetlengthT", "_d_arraysetlengthiT"},
                 {typeInfoTy, sizeTy, voidArrayPtrTy}, {STCconst, 0, 0});
 
   // byte[] _d_arrayappendcTX(const TypeInfo ti, ref byte[] px, size_t n)
-  createFwdDecl(LINKc, voidArrayTy, {"_d_arrayappendcTX"},
+  createFwdDecl(LINK::c, voidArrayTy, {"_d_arrayappendcTX"},
                 {typeInfoTy, voidArrayTy, sizeTy}, {STCconst, STCref, 0});
 
   // void[] _d_arrayappendT(const TypeInfo ti, ref byte[] x, byte[] y)
-  createFwdDecl(LINKc, voidArrayTy, {"_d_arrayappendT"},
+  createFwdDecl(LINK::c, voidArrayTy, {"_d_arrayappendT"},
                 {typeInfoTy, voidArrayTy, voidArrayTy}, {STCconst, STCref, 0});
 
   // void[] _d_arrayappendcd(ref byte[] x, dchar c)
   // void[] _d_arrayappendwd(ref byte[] x, dchar c)
-  createFwdDecl(LINKc, voidArrayTy, {"_d_arrayappendcd", "_d_arrayappendwd"},
+  createFwdDecl(LINK::c, voidArrayTy, {"_d_arrayappendcd", "_d_arrayappendwd"},
                 {voidArrayTy, dcharTy}, {STCref, 0});
 
   // byte[] _d_arraycatT(const TypeInfo ti, byte[] x, byte[] y)
-  createFwdDecl(LINKc, voidArrayTy, {"_d_arraycatT"},
+  createFwdDecl(LINK::c, voidArrayTy, {"_d_arraycatT"},
                 {typeInfoTy, voidArrayTy, voidArrayTy}, {STCconst, 0, 0});
 
   // void[] _d_arraycatnTX(const TypeInfo ti, byte[][] arrs)
-  createFwdDecl(LINKc, voidArrayTy, {"_d_arraycatnTX"},
+  createFwdDecl(LINK::c, voidArrayTy, {"_d_arraycatnTX"},
                 {typeInfoTy, voidArrayTy->arrayOf()}, {STCconst, 0});
 
   // Object _d_newclass(const ClassInfo ci)
   // Object _d_allocclass(const ClassInfo ci)
-  createFwdDecl(LINKc, objectTy, {"_d_newclass", "_d_allocclass"},
+  createFwdDecl(LINK::c, objectTy, {"_d_newclass", "_d_allocclass"},
                 {classInfoTy}, {STCconst}, Attr_NoAlias);
 
   // Throwable _d_newThrowable(const ClassInfo ci)
-  createFwdDecl(LINKc, throwableTy, {"_d_newThrowable"}, {classInfoTy},
+  createFwdDecl(LINK::c, throwableTy, {"_d_newThrowable"}, {classInfoTy},
                 {STCconst}, Attr_NoAlias);
 
   // void* _d_newitemT (TypeInfo ti)
   // void* _d_newitemiT(TypeInfo ti)
-  createFwdDecl(LINKc, voidPtrTy, {"_d_newitemT", "_d_newitemiT"}, {typeInfoTy},
+  createFwdDecl(LINK::c, voidPtrTy, {"_d_newitemT", "_d_newitemiT"}, {typeInfoTy},
                 {0}, Attr_NoAlias);
 
   // void _d_delarray_t(void[]* p, const TypeInfo_Struct ti)
-  createFwdDecl(LINKc, voidTy, {"_d_delarray_t"},
+  createFwdDecl(LINK::c, voidTy, {"_d_delarray_t"},
                 {voidArrayPtrTy, structTypeInfoTy}, {0, STCconst});
 
   // void _d_delmemory(void** p)
   // void _d_delinterface(void** p)
-  createFwdDecl(LINKc, voidTy, {"_d_delmemory", "_d_delinterface"},
+  createFwdDecl(LINK::c, voidTy, {"_d_delmemory", "_d_delinterface"},
                 {voidPtrTy->pointerTo()});
 
   // void _d_callfinalizer(void* p)
-  createFwdDecl(LINKc, voidTy, {"_d_callfinalizer"}, {voidPtrTy});
+  createFwdDecl(LINK::c, voidTy, {"_d_callfinalizer"}, {voidPtrTy});
 
   // D2: void _d_delclass(Object* p)
-  createFwdDecl(LINKc, voidTy, {"_d_delclass"}, {objectPtrTy});
+  createFwdDecl(LINK::c, voidTy, {"_d_delclass"}, {objectPtrTy});
 
   // void _d_delstruct(void** p, TypeInfo_Struct inf)
-  createFwdDecl(LINKc, voidTy, {"_d_delstruct"},
+  createFwdDecl(LINK::c, voidTy, {"_d_delstruct"},
                 {voidPtrTy->pointerTo(), structTypeInfoTy});
 
   //////////////////////////////////////////////////////////////////////////////
@@ -661,7 +651,7 @@ static void buildRuntimeModule() {
   // array slice copy when assertions are on!
   // void _d_array_slice_copy(void* dst, size_t dstlen, void* src, size_t
   // srclen, size_t elemsz)
-  createFwdDecl(LINKc, voidTy, {"_d_array_slice_copy"},
+  createFwdDecl(LINK::c, voidTy, {"_d_array_slice_copy"},
                 {voidPtrTy, sizeTy, voidPtrTy, sizeTy, sizeTy}, {},
                 Attr_1_3_NoCapture);
 
@@ -675,7 +665,7 @@ static void buildRuntimeModule() {
   {                                                                            \
     const char *fname1 = "_aApply" #a "1", *fname2 = "_aApply" #b "1",         \
                *fname3 = "_aApplyR" #a "1", *fname4 = "_aApplyR" #b "1";       \
-    createFwdDecl(LINKc, sizeTy, {fname1, fname2, fname3, fname4},             \
+    createFwdDecl(LINK::c, sizeTy, {fname1, fname2, fname3, fname4},             \
                   {TY, rt_dg1()});                                             \
   }
   STR_APPLY1(stringTy, cw, cd)
@@ -689,7 +679,7 @@ static void buildRuntimeModule() {
   {                                                                            \
     const char *fname1 = "_aApply" #a "2", *fname2 = "_aApply" #b "2",         \
                *fname3 = "_aApplyR" #a "2", *fname4 = "_aApplyR" #b "2";       \
-    createFwdDecl(LINKc, sizeTy, {fname1, fname2, fname3, fname4},             \
+    createFwdDecl(LINK::c, sizeTy, {fname1, fname2, fname3, fname4},             \
                   {TY, rt_dg2()});                                             \
   }
   STR_APPLY2(stringTy, cw, cd)
@@ -703,16 +693,16 @@ static void buildRuntimeModule() {
 
   // void[] _d_arrayassign_l(TypeInfo ti, void[] src, void[] dst, void* ptmp)
   // void[] _d_arrayassign_r(TypeInfo ti, void[] src, void[] dst, void* ptmp)
-  createFwdDecl(LINKc, voidArrayTy, {"_d_arrayassign_l", "_d_arrayassign_r"},
+  createFwdDecl(LINK::c, voidArrayTy, {"_d_arrayassign_l", "_d_arrayassign_r"},
                 {typeInfoTy, voidArrayTy, voidArrayTy, voidPtrTy});
 
   // void[] _d_arrayctor(TypeInfo ti, void[] from, void[] to)
-  createFwdDecl(LINKc, voidArrayTy, {"_d_arrayctor"},
+  createFwdDecl(LINK::c, voidArrayTy, {"_d_arrayctor"},
                 {typeInfoTy, voidArrayTy, voidArrayTy});
 
   // void* _d_arraysetassign(void* p, void* value, int count, TypeInfo ti)
   // void* _d_arraysetctor(void* p, void* value, int count, TypeInfo ti)
-  createFwdDecl(LINKc, voidPtrTy, {"_d_arraysetassign", "_d_arraysetctor"},
+  createFwdDecl(LINK::c, voidPtrTy, {"_d_arraysetassign", "_d_arraysetctor"},
                 {voidPtrTy, voidPtrTy, intTy, typeInfoTy}, {}, Attr_NoAlias);
 
   //////////////////////////////////////////////////////////////////////////////
@@ -721,12 +711,12 @@ static void buildRuntimeModule() {
 
   // cast interface
   // void* _d_interface_cast(void* p, ClassInfo c)
-  createFwdDecl(LINKc, voidPtrTy, {"_d_interface_cast"},
+  createFwdDecl(LINK::c, voidPtrTy, {"_d_interface_cast"},
                 {voidPtrTy, classInfoTy}, {}, Attr_ReadOnly_NoUnwind);
 
   // dynamic cast
   // void* _d_dynamic_cast(Object o, ClassInfo c)
-  createFwdDecl(LINKc, voidPtrTy, {"_d_dynamic_cast"}, {objectTy, classInfoTy},
+  createFwdDecl(LINK::c, voidPtrTy, {"_d_dynamic_cast"}, {objectTy, classInfoTy},
                 {}, Attr_ReadOnly_NoUnwind);
 
   //////////////////////////////////////////////////////////////////////////////
@@ -734,7 +724,7 @@ static void buildRuntimeModule() {
   //////////////////////////////////////////////////////////////////////////////
 
   // int _adEq2(void[] a1, void[] a2, TypeInfo ti)
-  createFwdDecl(LINKc, intTy, {"_adEq2"},
+  createFwdDecl(LINK::c, intTy, {"_adEq2"},
                 {voidArrayTy, voidArrayTy, typeInfoTy}, {}, Attr_ReadOnly);
 
   //////////////////////////////////////////////////////////////////////////////
@@ -743,26 +733,26 @@ static void buildRuntimeModule() {
 
   // void* _aaGetY(AA* aa, const TypeInfo aati, in size_t valuesize,
   //               in void* pkey)
-  createFwdDecl(LINKc, voidPtrTy, {"_aaGetY"},
+  createFwdDecl(LINK::c, voidPtrTy, {"_aaGetY"},
                 {aaTy->pointerTo(), aaTypeInfoTy, sizeTy, voidPtrTy},
                 {0, STCconst, STCin, STCin}, Attr_1_4_NoCapture);
 
   // inout(void)* _aaInX(inout AA aa, in TypeInfo keyti, in void* pkey)
   // FIXME: "inout" storageclass is not applied to return type
-  createFwdDecl(LINKc, voidPtrTy, {"_aaInX"}, {aaTy, typeInfoTy, voidPtrTy},
+  createFwdDecl(LINK::c, voidPtrTy, {"_aaInX"}, {aaTy, typeInfoTy, voidPtrTy},
                 {STCin | STCout, STCin, STCin}, Attr_ReadOnly_1_3_NoCapture);
 
   // bool _aaDelX(AA aa, in TypeInfo keyti, in void* pkey)
-  createFwdDecl(LINKc, boolTy, {"_aaDelX"}, {aaTy, typeInfoTy, voidPtrTy},
+  createFwdDecl(LINK::c, boolTy, {"_aaDelX"}, {aaTy, typeInfoTy, voidPtrTy},
                 {0, STCin, STCin}, Attr_1_3_NoCapture);
 
   // int _aaEqual(in TypeInfo tiRaw, in AA e1, in AA e2)
-  createFwdDecl(LINKc, intTy, {"_aaEqual"}, {typeInfoTy, aaTy, aaTy},
+  createFwdDecl(LINK::c, intTy, {"_aaEqual"}, {typeInfoTy, aaTy, aaTy},
                 {STCin, STCin, STCin}, Attr_1_2_NoCapture);
 
   // AA _d_assocarrayliteralTX(const TypeInfo_AssociativeArray ti,
   //                           void[] keys, void[] values)
-  createFwdDecl(LINKc, aaTy, {"_d_assocarrayliteralTX"},
+  createFwdDecl(LINK::c, aaTy, {"_d_assocarrayliteralTX"},
                 {aaTypeInfoTy, voidArrayTy, voidArrayTy}, {STCconst, 0, 0});
 
   //////////////////////////////////////////////////////////////////////////////
@@ -770,7 +760,7 @@ static void buildRuntimeModule() {
   //////////////////////////////////////////////////////////////////////////////
 
   // void _d_throw_exception(Throwable o)
-  createFwdDecl(LINKc, voidTy, {"_d_throw_exception"}, {throwableTy}, {},
+  createFwdDecl(LINK::c, voidTy, {"_d_throw_exception"}, {throwableTy}, {},
                 Attr_Cold_NoReturn);
 
   //////////////////////////////////////////////////////////////////////////////
@@ -784,40 +774,40 @@ static void buildRuntimeModule() {
           useMSVCEH() ? "__CxxFrameHandler3" : "_d_eh_personality";
       // (ptr ExceptionRecord, ptr EstablisherFrame, ptr ContextRecord,
       //  ptr DispatcherContext)
-      createFwdDecl(LINKc, intTy, {fname},
+      createFwdDecl(LINK::c, intTy, {fname},
                     {voidPtrTy, voidPtrTy, voidPtrTy, voidPtrTy});
     } else if (global.params.targetTriple->getArch() == llvm::Triple::arm) {
       // (int state, ptr ucb, ptr context)
-      createFwdDecl(LINKc, intTy, {"_d_eh_personality"},
+      createFwdDecl(LINK::c, intTy, {"_d_eh_personality"},
                     {intTy, voidPtrTy, voidPtrTy});
     } else {
       // (int ver, int actions, ulong eh_class, ptr eh_info, ptr context)
-      createFwdDecl(LINKc, intTy, {"_d_eh_personality"},
+      createFwdDecl(LINK::c, intTy, {"_d_eh_personality"},
                     {intTy, intTy, ulongTy, voidPtrTy, voidPtrTy});
     }
   }
 
   if (useMSVCEH()) {
     // _d_enter_cleanup(ptr frame)
-    createFwdDecl(LINKc, boolTy, {"_d_enter_cleanup"}, {voidPtrTy});
+    createFwdDecl(LINK::c, boolTy, {"_d_enter_cleanup"}, {voidPtrTy});
 
     // _d_leave_cleanup(ptr frame)
-    createFwdDecl(LINKc, voidTy, {"_d_leave_cleanup"}, {voidPtrTy});
+    createFwdDecl(LINK::c, voidTy, {"_d_leave_cleanup"}, {voidPtrTy});
 
     // Throwable _d_eh_enter_catch(ptr exception, ClassInfo catchType)
-    createFwdDecl(LINKc, throwableTy, {"_d_eh_enter_catch"},
+    createFwdDecl(LINK::c, throwableTy, {"_d_eh_enter_catch"},
                   {voidPtrTy, classInfoTy}, {});
   } else {
     // void _Unwind_Resume(ptr)
-    createFwdDecl(LINKc, voidTy, {getUnwindResumeFunctionName()}, {voidPtrTy},
+    createFwdDecl(LINK::c, voidTy, {getUnwindResumeFunctionName()}, {voidPtrTy},
                   {}, Attr_Cold_NoReturn);
 
     // Throwable _d_eh_enter_catch(ptr)
-    createFwdDecl(LINKc, throwableTy, {"_d_eh_enter_catch"}, {voidPtrTy}, {},
+    createFwdDecl(LINK::c, throwableTy, {"_d_eh_enter_catch"}, {voidPtrTy}, {},
                   Attr_NoUnwind);
 
     // void* __cxa_begin_catch(ptr)
-    createFwdDecl(LINKc, voidPtrTy, {"__cxa_begin_catch"}, {voidPtrTy}, {},
+    createFwdDecl(LINK::c, voidPtrTy, {"__cxa_begin_catch"}, {voidPtrTy}, {},
                   Attr_NoUnwind);
   }
 
@@ -828,14 +818,14 @@ static void buildRuntimeModule() {
   // void invariant._d_invariant(Object o)
   {
     static const std::string mangle =
-        getIRMangledFuncName("_D9invariant12_d_invariantFC6ObjectZv", LINKd);
-    createFwdDecl(LINKd, voidTy, {mangle}, {objectTy});
+        getIRMangledFuncName("_D9invariant12_d_invariantFC6ObjectZv", LINK::d);
+    createFwdDecl(LINK::d, voidTy, {mangle}, {objectTy});
   }
 
   // void _d_dso_registry(void* data)
   // (the argument is really a pointer to
   // rt.sections_elf_shared.CompilerDSOData)
-  createFwdDecl(LINKc, voidTy, {"_d_dso_registry"}, {voidPtrTy});
+  createFwdDecl(LINK::c, voidTy, {"_d_dso_registry"}, {voidPtrTy});
 
   //////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////
@@ -844,7 +834,7 @@ static void buildRuntimeModule() {
   // extern (C) void _d_cover_register2(string filename, size_t[] valid,
   //                                    uint[] data, ubyte minPercent)
   if (global.params.cov) {
-    createFwdDecl(LINKc, voidTy, {"_d_cover_register2"},
+    createFwdDecl(LINK::c, voidTy, {"_d_cover_register2"},
                   {stringTy, sizeTy->arrayOf(), uintTy->arrayOf(), ubyteTy});
   }
 
@@ -859,27 +849,27 @@ static void buildRuntimeModule() {
 
     // id objc_msgSend(id self, SEL op, ...)
     // Function called early and/or often, so lazy binding isn't worthwhile.
-    createFwdDecl(LINKc, objectPtrTy, {"objc_msgSend"},
+    createFwdDecl(LINK::c, objectPtrTy, {"objc_msgSend"},
                   {objectPtrTy, selectorPtrTy}, {},
                   AttrSet(NoAttrs, ~0U, llvm::Attribute::NonLazyBind));
 
     switch (global.params.targetTriple->getArch()) {
     case llvm::Triple::x86_64:
       // creal objc_msgSend_fp2ret(id self, SEL op, ...)
-      createFwdDecl(LINKc, Type::tcomplex80, {"objc_msgSend_fp2ret"},
+      createFwdDecl(LINK::c, Type::tcomplex80, {"objc_msgSend_fp2ret"},
                     {objectPtrTy, selectorPtrTy});
     // fall-thru
     case llvm::Triple::x86:
       // x86_64 real return only,  x86 float, double, real return
       // real objc_msgSend_fpret(id self, SEL op, ...)
-      createFwdDecl(LINKc, realTy, {"objc_msgSend_fpret"},
+      createFwdDecl(LINK::c, realTy, {"objc_msgSend_fpret"},
                     {objectPtrTy, selectorPtrTy});
     // fall-thru
     case llvm::Triple::arm:
     case llvm::Triple::thumb:
       // used when return value is aggregate via a hidden sret arg
       // void objc_msgSend_stret(T *sret_arg, id self, SEL op, ...)
-      createFwdDecl(LINKc, voidTy, {"objc_msgSend_stret"},
+      createFwdDecl(LINK::c, voidTy, {"objc_msgSend_stret"},
                     {objectPtrTy, selectorPtrTy});
       break;
     default:
@@ -892,17 +882,17 @@ static void buildRuntimeModule() {
   ////// DMD-style tracing calls
 
   // extern(C) void trace_pro(char[] id)
-  createFwdDecl(LINKc, voidTy, {"trace_pro"}, {stringTy});
+  createFwdDecl(LINK::c, voidTy, {"trace_pro"}, {stringTy});
 
   // extern(C) void _c_trace_epi()
-  createFwdDecl(LINKc, voidTy, {"_c_trace_epi"}, {});
+  createFwdDecl(LINK::c, voidTy, {"_c_trace_epi"}, {});
 
   //////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////
   ////// C standard library functions (a druntime link dependency)
 
   // int memcmp(const void *s1, const void *s2, size_t n);
-  createFwdDecl(LINKc, intTy, {"memcmp"}, {voidPtrTy, voidPtrTy, sizeTy}, {},
+  createFwdDecl(LINK::c, intTy, {"memcmp"}, {voidPtrTy, voidPtrTy, sizeTy}, {},
                 Attr_ReadOnly_NoUnwind_1_2_NoCapture);
 }
 
