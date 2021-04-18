@@ -1,10 +1,6 @@
 //===-- ctfloat.cpp -------------------------------------------------------===//
 //
-<<<<<<< HEAD
-//                         LDC � the LLVM D compiler
-=======
 //                         LDC – the LLVM D compiler
->>>>>>> v1.25.1
 //
 // This file is distributed under the BSD-style LDC license. See the LICENSE
 // file for details.

@@ -1165,8 +1165,8 @@ void codegenModules(Modules &modules) {
 
 #if LDC_MLIR_ENABLED
     // Registering DDialect and getting mlircontext with it
-    mlir::registerDialect<mlir::D::DDialect>();
     mlir::MLIRContext mlircontext;
+    mlircontext.loadDialect<mlir::D::DDialect>();
     ldc::CodeGenerator cg(getGlobalContext(), mlircontext,
                           global.params.oneobj);
 #else

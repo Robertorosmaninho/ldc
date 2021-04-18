@@ -491,17 +491,17 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
       fatal();
     }
 
-    auto ret = p->ir->CreateAtomicCmpXchg(ptr, cmp, val, successOrdering,
+    /*auto ret = p->ir->CreateAtomicCmpXchg(ptr, cmp, val, successOrdering,
                                            failureOrdering);
-    ret->setWeak(isWeak);
+    ret->setWeak(isWeak);*/
 
     // we return a struct; allocate on stack and store to both fields manually
     // (avoiding DtoAllocaDump() due to bad optimized codegen, most likely
     // because of i1)
     auto mem = DtoAlloca(e->type);
-    DtoStore(p->ir->CreateExtractValue(ret, 0),
+    /*DtoStore(p->ir->CreateExtractValue(ret, 0),
              DtoBitCast(DtoGEP(mem, 0u, 0), ptr->getType()));
-    DtoStoreZextI8(p->ir->CreateExtractValue(ret, 1), DtoGEP(mem, 0, 1));
+    DtoStoreZextI8(p->ir->CreateExtractValue(ret, 1), DtoGEP(mem, 0, 1));*/
 
     result = new DLValue(e->type, mem);
     return true;
@@ -535,10 +535,10 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     int atomicOrdering = (*e->arguments)[2]->toInteger();
     LLValue *ptr = DtoRVal(exp1);
     LLValue *val = DtoRVal(exp2);
-    LLValue *ret =
+    /*LLValue *ret =
         p->ir->CreateAtomicRMW(llvm::AtomicRMWInst::BinOp(op), ptr, val,
                                llvm::AtomicOrdering(atomicOrdering));
-    result = new DImValue(exp2->type, ret);
+    result = new DImValue(exp2->type, ret);*/
     return true;
   }
 

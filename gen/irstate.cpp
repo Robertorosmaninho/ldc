@@ -27,22 +27,6 @@ const llvm::DataLayout *gDataLayout = nullptr;
 TargetABI *gABI = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////
-<<<<<<< HEAD
-IRScope::IRScope() : builder(gIR->context()) { begin = nullptr; }
-
-IRScope::IRScope(llvm::BasicBlock *b) : begin(b), builder(b) {}
-
-IRScope::IRScope(const IRScope &other) : begin(other.begin), builder(begin) {}
-
-IRScope &IRScope::operator=(const IRScope &rhs) {
-  begin = rhs.begin;
-  builder.SetInsertPoint(begin);
-  return *this;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-=======
->>>>>>> v1.25.1
 IRState::IRState(const char *name, llvm::LLVMContext &context)
     : builder(context), module(name, context), objc(module), DBuilder(this) {
   ir.state = this;

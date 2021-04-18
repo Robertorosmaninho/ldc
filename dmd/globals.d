@@ -483,12 +483,6 @@ else
 
     extern (C++) void _init()
     {
-<<<<<<< HEAD
-
-        static if (!IN_LLVM) _version = import("VERSION") ~ '\0';
-
-=======
->>>>>>> v1.25.1
         version (MARS)
 
         {

@@ -820,12 +820,7 @@ int linkObjToBinaryGcc(llvm::StringRef outputPath,
     argsBuilder = make_unique<LdArgsBuilder>();
   } else {
     tool = getGcc();
-<<<<<<< HEAD
-    argsBuilder = make_unique<ArgsBuilder>();
-#if LDC_LLVM_VER >= 500
-=======
     argsBuilder = llvm::make_unique<ArgsBuilder>();
->>>>>>> v1.25.1
   }
 
   // build arguments

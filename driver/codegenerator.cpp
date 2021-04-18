@@ -23,17 +23,27 @@
 #include "gen/MLIR/Dialect.h"
 #include "gen/MLIR/MLIRGen.h"
 #include "gen/MLIR/Passes.h"
-#include "mlir/Pass/Pass.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Transforms/Passes.h"
 #include "mlir/ExecutionEngine/ExecutionEngine.h"
 #include "mlir/ExecutionEngine/OptUtils.h"
-#include "mlir/Target/LLVMIR.h"
-#include "llvm/Bitcode/BitcodeWriter.h"
+#include "mlir/IR/AsmState.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/Verifier.h"
+#include "mlir/InitAllDialects.h"
+#include "mlir/Parser.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Export.h"
+#include "mlir/Transforms/Passes.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/Function.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
-#include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/raw_ostream.h"
 #endif
 #include "gen/dynamiccompile.h"
 #include "gen/logger.h"
@@ -83,23 +93,15 @@ createAndSetDiagnosticsOutputFile(IRState &irs, llvm::LLVMContext &ctx,
     // If there is instrumentation data available, also output function hotness
     const bool withHotness = opts::isUsingPGOProfile();
 
-#if LDC_LLVM_VER >= 1100
-    auto remarksFileOrError = llvm::setupLLVMOptimizationRemarks(
-#elif LDC_LLVM_VER >= 900
-        auto remarksFileOrError = llvm::setupOptimizationRemarks(
-#endif
 #if LDC_LLVM_VER >= 900
-<<<<<<< HEAD
-        ctx, diagnosticsFilename, "", "", withHotness);
-=======
     auto remarksFileOrError =
 #if LDC_LLVM_VER >= 1100
         llvm::setupLLVMOptimizationRemarks(
 #else
         llvm::setupOptimizationRemarks(
 #endif
-            ctx, diagnosticsFilename, "", "", withHotness);
->>>>>>> v1.25.1
+
+        ctx, diagnosticsFilename, "", "", withHotness);
     if (llvm::Error e = remarksFileOrError.takeError()) {
       irs.dmodule->error("Could not create file %s: %s",
                          diagnosticsFilename.c_str(),
@@ -122,11 +124,6 @@ createAndSetDiagnosticsOutputFile(IRState &irs, llvm::LLVMContext &ctx,
         llvm::make_unique<llvm::yaml::Output>(diagnosticsOutputFile->os()));
 
     if (withHotness) {
-<<<<<<< HEAD
-
-#if LDC_LLVM_VER >= 500
-=======
->>>>>>> v1.25.1
       ctx.setDiagnosticsHotnessRequested(true);
     }
 #endif // LDC_LLVM_VER < 900
@@ -301,7 +298,7 @@ void CodeGenerator::writeAndFreeLLModule(const char *filename) {
   llvm::Metadata *IdentNode[] = {llvm::MDString::get(ir_->context(), Version)};
   IdentMetadata->addOperand(llvm::MDNode::get(ir_->context(), IdentNode));
 
-  context_.setInlineAsmDiagnosticHandler(inlineAsmDiagnosticHandler, ir_);
+  //context_.setInlineAsmDiagnosticHandler(inlineAsmDiagnosticHandler, ir_);
 
   std::unique_ptr<llvm::ToolOutputFile> diagnosticsOutputFile =
       createAndSetDiagnosticsOutputFile(*ir_, context_, filename);
@@ -363,7 +360,9 @@ void CodeGenerator::emitMLIR(Module *m) {
     fatal();
   }
 
+  mlir::registerMLIRContextCLOptions();
   mlir::registerPassManagerCLOptions();
+
   mlir::OwningModuleRef module = ldc_mlir::mlirGen(mlirContext_, m);
   if (!module) {
     const auto llpath =
@@ -384,6 +383,10 @@ int runJit(mlir::ModuleOp module) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
+  // Register the translation from MLIR to LLVM IR, which must happen before we
+  // can JIT-compile.
+  mlir::registerLLVMDialectTranslation(*module->getContext());
+
   // An optimization pipeline to use within the execution engine.
   auto optPipeline = mlir::makeOptimizingTransformer(
       /*optLevel=*/0 ? 3 : 0, /*sizeLevel=*/0,
@@ -391,7 +394,8 @@ int runJit(mlir::ModuleOp module) {
 
   // Create an MLIR execution engine. The execution engine eagerly JIT-compiles
   // the module.
-  auto maybeEngine = mlir::ExecutionEngine::create(module, optPipeline);
+  auto maybeEngine = mlir::ExecutionEngine::create(
+      module, /*llvmModuleBuilder=*/nullptr, optPipeline);
   assert(maybeEngine && "failed to construct an execution engine");
   auto &engine = maybeEngine.get();
 
@@ -406,7 +410,12 @@ int runJit(mlir::ModuleOp module) {
 }
 
 void emitLLVMIR(mlir::ModuleOp module, const char *filename) {
-  auto llvmModule = mlir::translateModuleToLLVMIR(module);
+  // Register the translation to LLVM IR with the MLIR context.
+  mlir::registerLLVMDialectTranslation(*module->getContext());
+
+  // Convert the module to LLVM IR in a new LLVM IR context.
+  llvm::LLVMContext llvmContext;
+  auto llvmModule = mlir::translateModuleToLLVMIR(module, llvmContext);
   if (!llvmModule) {
     llvm::errs() << "Failed to emit LLVM IR\n";
     fatal();
@@ -438,7 +447,8 @@ void emitLLVMIR(mlir::ModuleOp module, const char *filename) {
     const auto bcpath = std::string(buffer.data(), buffer.size());
     llvm::raw_fd_ostream baba(bcpath, errinfo, llvm::sys::fs::F_None);
     const auto &M = *llvmModule;
-    llvm::WriteBitcodeToFile(M, baba);
+    //llvm::WriteBitcodeToFile(M, baba);
+    llvm::errs() << *llvmModule << "\n";
   }
 }
 

@@ -20,18 +20,12 @@
 #pragma once
 
 #include "gen/irstate.h"
-<<<<<<< HEAD
 #if LDC_MLIR_ENABLED
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Module.h"
-=======
-
-#if LDC_MLIR_ENABLED
 namespace mlir {
 class MLIRContext;
 class OwningModuleRef;
 }
->>>>>>> v1.25.1
 #endif
 
 namespace ldc {
@@ -43,10 +37,6 @@ public:
                 mlir::MLIRContext &mlirContext,
 #endif
                 bool singleObj);
-<<<<<<< HEAD
-=======
-
->>>>>>> v1.25.1
   ~CodeGenerator();
   void emit(Module *m);
 

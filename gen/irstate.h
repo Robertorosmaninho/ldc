@@ -58,22 +58,11 @@ class StructLiteralExp;
 struct IrFunction;
 struct IrModule;
 
-<<<<<<< HEAD
-// represents a scope
-struct IRScope {
-  llvm::BasicBlock *begin;
-  IRBuilder<> builder;
-
-  IRScope();
-  IRScope(const IRScope &);
-  explicit IRScope(llvm::BasicBlock *b);
-=======
 // Saves the IRBuilder state and restores it on destruction.
 struct IRBuilderScope {
 private:
   llvm::IRBuilderBase::InsertPointGuard ipGuard;
   llvm::IRBuilderBase::FastMathFlagGuard fmfGuard;
->>>>>>> v1.25.1
 
 public:
   explicit IRBuilderScope(llvm::IRBuilderBase &builder)

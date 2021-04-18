@@ -251,6 +251,7 @@ static void addSanitizerCoveragePass(const PassManagerBuilder &Builder,
 #else
       createSanitizerCoverageModulePass
 #endif
+#endif
 }
 
 // Adds PGO instrumentation generation and use passes.
