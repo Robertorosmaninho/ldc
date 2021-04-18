@@ -31,8 +31,9 @@ void onlyOneMainCheck(FuncDeclaration *fd) {
   // We'd actually want all possible main functions to be mutually exclusive.
   // Unfortunately, a D main implies a C main, so only check C mains with
   // -betterC.
+  const bool isOSWindows = global.params.targetTriple->isOSWindows();
   if (fd->isMain() || (global.params.betterC && fd->isCMain()) ||
-      (global.params.isWindows && (fd->isWinMain() || fd->isDllMain()))) {
+      (isOSWindows && (fd->isWinMain() || fd->isDllMain()))) {
     // global - across all modules compiled in this compiler invocation
     static Loc mainLoc;
     if (!mainLoc.filename) {
@@ -40,7 +41,7 @@ void onlyOneMainCheck(FuncDeclaration *fd) {
       assert(mainLoc.filename);
     } else {
       const char *otherMainNames =
-          global.params.isWindows ? ", `WinMain`, or `DllMain`" : "";
+          isOSWindows ? ", `WinMain`, or `DllMain`" : "";
       const char *mainSwitch =
           global.params.addMain ? ", -main switch added another `main()`" : "";
       error(fd->loc,
@@ -105,14 +106,16 @@ MLIRFunction::DtoMLIRResolveFunction(FuncDeclaration *funcDeclaration) {
         } else if (templateDeclaration->llvmInternal == LLVMinline_ir) {
           Logger::println("magic inline ir found");
           funcDeclaration->llvmInternal = LLVMinline_ir;
-          funcDeclaration->linkage = LINKc;
+          funcDeclaration->linkage = LINK::c;
           Type *type = funcDeclaration->type;
           assert(type->ty == Tfunction);
-          static_cast<TypeFunction *>(type)->linkage = LINKc;
+          static_cast<TypeFunction *>(type)->linkage = LINK::c;
 
           //DtoMLIRFunctionType(funcDeclaration, nullptr, nullptr);
           return nullptr; // this gets mapped to a special inline IR call, no
           // point in going on.
+
+
         }
       }
     }
@@ -162,7 +165,7 @@ mlir::FunctionType MLIRFunction::DtoMLIRFunctionType(FuncDeclaration *Fd) {
       if (!global.gag)
         fatal();
       // TODO: Needs to be tested
-      return mlir::FunctionType::get({}, {}, &context);
+      return mlir::FunctionType::get(&context, {}, {});
       // return LLFunctionType::get(LLType::getVoidTy(gIR->context()),
       //    /*isVarArg=*/false);
     }
@@ -254,12 +257,12 @@ MLIRFunction::DtoMLIRFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
     // D and C main functions always return i32, even if declared as returning
     // void.
 
-    ret = mlir::FunctionType::get({}, builder.getIntegerType(32), &context);
+    ret = mlir::FunctionType::get(&context, {}, builder.getIntegerType(32));
     ret_name = "i32";
   } else {
     Type *rt = f->next;
     ret_name = rt->toChars();
-    const bool byref = f->isref && rt->toBasetype()->ty != Tvoid;
+    const bool byref = f->isref() && rt->toBasetype()->ty != Tvoid;
     std::vector<mlir::Attribute> attrs;
 
     if (abi->returnInArg(f, Fd && Fd->needThis())) {
@@ -291,8 +294,8 @@ MLIRFunction::DtoMLIRFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
   }
 
   bool hasObjCSelector = false;
-  if (Fd && Fd->linkage == LINKobjc && thistype) {
-    if (Fd->selector) {
+  if (Fd && Fd->linkage == LINK::objc && thistype) {
+    if (Fd->objc.selector) {
       hasObjCSelector = true;
     } else if (Fd->parent->isClassDeclaration()) {
       Fd->error("Objective-C `@selector` is missing");
@@ -308,7 +311,7 @@ MLIRFunction::DtoMLIRFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
   // Non-typesafe variadics (both C and D styles) are also variadics on the LLVM
   // level.
   const bool isLLVMVariadic = (f->parameterList.varargs == VARARGvariadic);
-  if (isLLVMVariadic && f->linkage == LINKd) {
+  if (isLLVMVariadic && f->linkage == LINK::d) {
     // Add extra `_arguments` parameter for D-style variadic functions.
     Logger::println("arg_arguments: '%s' - Missing MLIRGen",
                     getTypeInfoType()->arrayOf()->toChars());
@@ -319,7 +322,7 @@ MLIRFunction::DtoMLIRFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
   const size_t numExplicitDArgs = f->parameterList.length();
 
   // if this _Dmain() doesn't have an argument, we force it to have one
-  if (isMain && f->linkage != LINKc && numExplicitDArgs == 0) {
+  if (isMain && f->linkage != LINK::c && numExplicitDArgs == 0) {
     Type *mainargs = Type::tchar->arrayOf()->arrayOf();
     args.push_back(get_MLIRtype(nullptr, mainargs));
     //++nextLLArgIdx;
@@ -372,7 +375,7 @@ MLIRFunction::DtoMLIRFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
 
 
 
-  functionType = mlir::FunctionType::get(args, ret, &context);
+  functionType = mlir::FunctionType::get(&context,args, ret);
 
   if (ret == nullptr) {
     ret = builder.getNoneType();
@@ -433,7 +436,7 @@ MLIRFunction::DtoMLIRDeclareFunction(FuncDeclaration *funcDeclaration) {
   // issue 9028).
   const bool forceC =
       DtoIsIntrinsic(funcDeclaration) || funcDeclaration->isMain();
-  const auto link = forceC ? LINKc : f->linkage;
+  const auto link = forceC ? LINK::c : f->linkage;
 
   // mangled name
   const auto irMangle = getIRMangledName(funcDeclaration, link);

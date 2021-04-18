@@ -23,11 +23,10 @@
 #include "gen/MLIR/MLIRGen.h"
 #include "gen/MLIR/MLIRDeclaration.h"
 
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Module.h"
-#include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/TypeSupport.h"
 #include "mlir/IR/Types.h"
 
 #include "llvm/ADT/ScopedHashTable.h"
@@ -82,7 +81,7 @@ public:
   std::vector<mlir::Value> mlirGen(ScopeStatement *scopeStatement);
 
   mlir::Location loc(Loc loc) {
-    return builder.getFileLineColLoc(
+    return mlir::FileLineColLoc::get(
         builder.getIdentifier(StringRef(loc.filename)), loc.linnum,
         loc.charnum);
   }

@@ -16,8 +16,9 @@
 #include "gen/MLIR/Dialect.h"
 #include "gen/MLIR/Passes.h"
 
-#include "mlir/Dialect/AffineOps/AffineOps.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/Sequence.h"
@@ -37,7 +38,7 @@ static MemRefType convertTensorToMemRef(TensorType type) {
 /// Insert an allocation and deallocation for the given MemRefType.
 static Value insertAllocAndDealloc(MemRefType type, Location loc,
                                    PatternRewriter &rewriter) {
-  auto alloc = rewriter.create<AllocOp>(loc, type);
+  auto alloc = rewriter.create<memref::AllocOp>(loc, type);
 
   // Make sure to allocate at the beginning of the block.
   auto *parentBlock = alloc.getOperation()->getBlock();
@@ -46,19 +47,18 @@ static Value insertAllocAndDealloc(MemRefType type, Location loc,
   // Make sure to deallocate this alloc at the end of the block.
   // TODO: Analyze the impact of it in control flow
   // This is fine as toy functions have no control flow.
-  auto dealloc = rewriter.create<DeallocOp>(loc, alloc);
+  auto dealloc = rewriter.create<memref::DeallocOp>(loc, alloc);
   dealloc.getOperation()->moveBefore(&parentBlock->back());
   return alloc;
 }
 
 /// This defines the function type used to process an iteration of a lowered
-/// loop. It takes as input a rewriter, an array of memRefOperands corresponding
-/// to the operands of the input operation, and the set of loop induction
-/// variables for the iteration. It returns a value to store at the current
-/// index of the iteration.
-using LoopIterationFn = function_ref<Value(PatternRewriter &rewriter,
-                                           ArrayRef<Value> memRefOperands,
-                                           ArrayRef<Value> loopIvs)>;
+/// loop. It takes as input an OpBuilder, an range of memRefOperands
+/// corresponding to the operands of the input operation, and the range of loop
+/// induction variables for the iteration. It returns a value to store at the
+/// current index of the iteration.
+using LoopIterationFn = function_ref<Value(
+    OpBuilder &rewriter, ValueRange memRefOperands, ValueRange loopIvs)>;
 
 static void lowerOpToLoops(Operation *op, ArrayRef<Value> operands,
                            PatternRewriter &rewriter,
@@ -70,26 +70,21 @@ static void lowerOpToLoops(Operation *op, ArrayRef<Value> operands,
   auto memRefType = convertTensorToMemRef(tensorType);
   auto alloc = insertAllocAndDealloc(memRefType, loc, rewriter);
 
-  // Create an empty affine loop for each of the dimensions within the shape.
-  SmallVector<Value, 4> loopIvs;
-  for (auto dim : tensorType.getShape()) {
-    auto loop = rewriter.create<AffineForOp>(loc, /*lb=*/0, dim, /*step=*/1);
-    loop.getBody()->clear();
-    loopIvs.push_back(loop.getInductionVar());
-
-    // Terminate the loop body and update the rewriter insertion point to the
-    // beginning of the loop.
-    rewriter.setInsertionPointToStart(loop.getBody());
-    rewriter.create<AffineTerminatorOp>(loc);
-    rewriter.setInsertionPointToStart(loop.getBody());
-  }
-
-  // Generate a call to the processing function with the rewriter, the memref
-  // operands, and the loop induction variables. This function will return the
-  // value to store at the current index.
-  Value valueToStore = processIteration(rewriter, operands, loopIvs);
-  rewriter.create<AffineStoreOp>(loc, valueToStore, alloc,
-                                 llvm::makeArrayRef(loopIvs));
+  // Create a nest of affine loops, with one loop per dimension of the shape.
+  // The buildAffineLoopNest function takes a callback that is used to construct
+  // the body of the innermost loop given a builder, a location and a range of
+  // loop induction variables.
+  SmallVector<int64_t, 4> lowerBounds(tensorType.getRank(), /*Value=*/0);
+  SmallVector<int64_t, 4> steps(tensorType.getRank(), /*Value=*/1);
+  buildAffineLoopNest(
+      rewriter, loc, lowerBounds, tensorType.getShape(), steps,
+      [&](OpBuilder &nestedBuilder, Location loc, ValueRange ivs) {
+        // Call the processing function with the rewriter, the memref operands,
+        // and the loop induction variables. This function will return the value
+        // to store at the current index.
+        Value valueToStore = processIteration(nestedBuilder, operands, ivs);
+        nestedBuilder.create<AffineStoreOp>(loc, valueToStore, alloc, ivs);
+      });
 
   // Replace this operation with the generated alloc.
   rewriter.replaceOp(op, alloc);
@@ -105,32 +100,32 @@ struct BinaryOpLowering : public ConversionPattern {
   BinaryOpLowering(MLIRContext *ctx)
       : ConversionPattern(BinaryOp::getOperationName(), 1, ctx) {}
 
-  PatternMatchResult
+  LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
     auto loc = op->getLoc();
     lowerOpToLoops(
         op, operands, rewriter,
-        [loc](PatternRewriter &rewriter, ArrayRef<Value> memRefOperands,
-              ArrayRef<Value> loopIvs) {
+        [loc](OpBuilder &builder, ValueRange memRefOperands,
+              ValueRange loopIvs) {
           // Generate an adaptor for the remapped operands of the BinaryOp. This
           // allows for using the nice named accessors that are generated by the
           // ODS.
-          typename BinaryOp::OperandAdaptor binaryAdaptor(memRefOperands);
+          typename BinaryOp::Adaptor binaryAdaptor(memRefOperands);
 
           // Generate loads for the element of 'lhs' and 'rhs' at the inner
           // loop.
 
           auto loadedLhs =
-              rewriter.create<AffineLoadOp>(loc, binaryAdaptor.lhs(), loopIvs);
+              builder.create<AffineLoadOp>(loc, binaryAdaptor.lhs(), loopIvs);
 
           auto loadedRhs =
-              rewriter.create<AffineLoadOp>(loc, binaryAdaptor.rhs(), loopIvs);
+              builder.create<AffineLoadOp>(loc, binaryAdaptor.rhs(), loopIvs);
 
           // Create the binary operation performed on the loaded values.
-          return rewriter.create<LoweredBinaryOp>(loc, loadedLhs, loadedRhs);
+          return builder.create<LoweredBinaryOp>(loc, loadedLhs, loadedRhs);
         });
-    return matchSuccess();
+    return success();
   }
 };
 
@@ -155,10 +150,10 @@ using XorUOpLowering = BinaryOpLowering<D::XorOp, XOrOp>;
 // DToAffine RewritePatterns: Integer operations
 //===----------------------------------------------------------------------===//
 
-struct IntegerOpLowering : public OpRewritePattern<D::IntegerOp> {
+/*struct IntegerOpLowering : public OpRewritePattern<D::IntegerOp> {
   using OpRewritePattern<D::IntegerOp>::OpRewritePattern;
 
-  PatternMatchResult matchAndRewrite(D::IntegerOp op,
+  LogicalResult matchAndRewrite(D::IntegerOp op,
                                      PatternRewriter &rewriter) const final {
     Attribute value = op.value();
     Location loc = op.getLoc();
@@ -206,7 +201,7 @@ struct IntegerOpLowering : public OpRewritePattern<D::IntegerOp> {
       };
 
       // Start the element storing recursion from the first dimension.
-      storeElements(/*dimension=*/0);
+      storeElements(/*dimension=*//*0);
 
     } else {
 
@@ -231,23 +226,23 @@ struct IntegerOpLowering : public OpRewritePattern<D::IntegerOp> {
       };
 
       // Start the element storing recursion from the first dimension.
-      storeElements(/*dimension=*/0);
+      storeElements(/*dimension=*//*0);
     }
 
     // Replace this operation with the generated alloc.
     rewriter.replaceOp(op, alloc);
-    return matchSuccess();
+    return success();
   }
 };
-
+*/
 //===----------------------------------------------------------------------===//
 // DToAffine RewritePatterns: Float operations
 //===----------------------------------------------------------------------===//
 
-struct FloatOpLowering : public OpRewritePattern<D::FloatOp> {
+/*struct FloatOpLowering : public OpRewritePattern<D::FloatOp> {
   using OpRewritePattern<D::FloatOp>::OpRewritePattern;
 
-  PatternMatchResult matchAndRewrite(D::FloatOp op,
+  LogicalResult matchAndRewrite(D::FloatOp op,
                                      PatternRewriter &rewriter) const final {
     Attribute value = op.value();
     Location loc = op.getLoc();
@@ -294,22 +289,22 @@ struct FloatOpLowering : public OpRewritePattern<D::FloatOp> {
     };
 
     // Start the element storing recursion from the first dimension.
-    storeElements(/*dimension=*/0);
+    storeElements(/*dimension=*//*0);
 
     // Replace this operation with the generated alloc.
     rewriter.replaceOp(op, alloc);
-    return matchSuccess();
+    return success();
   }
-};
+};*/
 
 //===----------------------------------------------------------------------===//
 // DToAffine RewritePatterns: Double operations
 //===----------------------------------------------------------------------===//
-
+/*
 struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
   using OpRewritePattern<D::DoubleOp>::OpRewritePattern;
 
-  PatternMatchResult matchAndRewrite(D::DoubleOp op,
+  LogicalResult matchAndRewrite(D::DoubleOp op,
                                      PatternRewriter &rewriter) const final {
     Attribute value = op.value();
     Location loc = op.getLoc();
@@ -356,14 +351,14 @@ struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
     };
 
     // Start the element storing recursion from the first dimension.
-    storeElements(/*dimension=*/0);
+    storeElements(/*dimension=*//*0);
 
     // Replace this operation with the generated alloc.
     rewriter.replaceOp(op, alloc);
-    return matchSuccess();
+    return success();
   }
 };
-
+*/
 //===----------------------------------------------------------------------===//
 // DToAffine RewritePatterns: Cast operations
 //===----------------------------------------------------------------------===//
@@ -371,7 +366,7 @@ struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
 struct CastOpLowering : public OpRewritePattern<D::CastOp> {
   using OpRewritePattern<D::CastOp>::OpRewritePattern;
 
-  PatternMatchResult matchAndRewrite(D::CastOp op,
+  LogicalResult matchAndRewrite(D::CastOp op,
                                      PatternRewriter &rewriter) const final {
     Location loc = op.getLoc();
     std::vector<Value> values;
@@ -380,11 +375,11 @@ struct CastOpLowering : public OpRewritePattern<D::CastOp> {
     ArrayRef<Value> operands(values);
     lowerOpToLoops(
         op, operands, rewriter,
-        [loc](PatternRewriter &rewriter, ArrayRef<Value> operands,
-              ArrayRef<Value> loopIvs) {
+        [loc](OpBuilder &builder, ValueRange memRefOperands,
+              ValueRange loopIvs) {
 
-          Value value = operands.front();
-          Value result = operands.back();
+          Value value = memRefOperands.front();
+          Value result = memRefOperands.back();
 
           Type in = value.getType().cast<TensorType>().getElementType();
           Type out = result.getType().cast<TensorType>().getElementType();
@@ -416,33 +411,33 @@ struct CastOpLowering : public OpRewritePattern<D::CastOp> {
           // Generate loads for the element of 'lhs' and 'rhs' at the inner
           // loop.
           Value loadedLhs =
-              rewriter.create<AffineLoadOp>(loc, value, loopIvs);
+              builder.create<AffineLoadOp>(loc, value, loopIvs);
 
           Value loadedRhs =
-              rewriter.create<AffineLoadOp>(loc, result, loopIvs);
+              builder.create<AffineLoadOp>(loc, result, loopIvs);
 
           Operation *NewOp = nullptr;
 
           if (SizeIsGreaterThan(in, out))
-            NewOp = rewriter.create<TruncateIOp>(loc, loadedLhs,
+            NewOp = builder.create<TruncateIOp>(loc, loadedLhs,
                                                  loadedRhs.getType());
           else if (SizeIsGreaterThan(out, in))
-            NewOp = rewriter.create<ZeroExtendIOp>(loc, loadedLhs,
+            NewOp = builder.create<ZeroExtendIOp>(loc, loadedLhs,
                                                    loadedRhs.getType());
           else if ((in.isF64() && (out.isF32() || out.isF16())) ||
                    (in.isF32() && out.isF16()))
-            NewOp = rewriter.create<FPTruncOp>(loc, loadedLhs,
+            NewOp = builder.create<FPTruncOp>(loc, loadedLhs,
                                                loadedRhs.getType());
           else if (((in.isF16() || out.isF32()) && out.isF64()) ||
                    (in.isF16() && out.isF32()))
-            NewOp = rewriter.create<FPExtOp>(loc, loadedLhs,
+            NewOp = builder.create<FPExtOp>(loc, loadedLhs,
                                              loadedRhs.getType());
             // FPToSIOp is only available on LLVM 11
           else if (isInteger(in) == 2 && isInteger(out) == 1)
-            NewOp = rewriter.create<D::CastOp>(loc, loadedLhs,
+            NewOp = builder.create<D::CastOp>(loc, loadedLhs,
                                                loadedRhs.getType());
           else if (isInteger(in) == 1 && isInteger(out) == 2)
-            NewOp = rewriter.create<SIToFPOp>(loc, loadedLhs,
+            NewOp = builder.create<SIToFPOp>(loc, loadedLhs,
                                               loadedRhs.getType());
           else
             llvm_unreachable("Impossible to Cast Type");
@@ -450,11 +445,11 @@ struct CastOpLowering : public OpRewritePattern<D::CastOp> {
           return NewOp->getResult(0);
         });
 
-    return  matchSuccess();
+    return  success();
   }
 };
 
-struct CallOpLowering : public OpRewritePattern<D::CallOp> {
+/*struct CallOpLowering : public OpRewritePattern<D::CallOp> {
   using OpRewritePattern<D::CallOp>::OpRewritePattern;
 
   PatternMatchResult matchAndRewrite(D::CallOp op,
@@ -465,7 +460,7 @@ struct CallOpLowering : public OpRewritePattern<D::CallOp> {
                                               op.getOperands());
     return matchSuccess();
   }
-};
+};*/
 
 //===----------------------------------------------------------------------===//
 // DToAffineLoweringPass
@@ -475,7 +470,10 @@ struct CallOpLowering : public OpRewritePattern<D::CallOp> {
 /// computationally intensive (like matmul for example...) while keeping the
 /// rest of the code in the D dialect.
 namespace {
-struct DToAffineLoweringPass : public FunctionPass<DToAffineLoweringPass> {
+struct DToAffineLoweringPass : public PassWrapper<DToAffineLoweringPass, FunctionPass> {
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<AffineDialect, memref::MemRefDialect, StandardOpsDialect>();
+  }
   void runOnFunction() final;
 };
 } // end anonymous namespace.
@@ -517,7 +515,8 @@ void DToAffineLoweringPass::runOnFunction() {
 
   // We define the specific operations, or dialects, that are legal targets for
   // this lowering. In our case, we are lowering to `Standard` dialect.
-  target.addLegalDialect<mlir::AffineOpsDialect, mlir::StandardOpsDialect>();
+  target.addLegalDialect<mlir::AffineDialect, memref::MemRefDialect,
+                         mlir::StandardOpsDialect>();
 
   // We also define the Toy dialect as Illegal so that the conversion will fail
   // if any of these operations are *not* converted. If we actually want
@@ -530,18 +529,19 @@ void DToAffineLoweringPass::runOnFunction() {
 
   // Now that the conversion target has been defined, we just need to provide
   // the set of patterns that will lower the Toy operations.
-  OwningRewritePatternList patterns;
-  patterns.insert<IntegerOpLowering, FloatOpLowering, DoubleOpLowering,
+  RewritePatternSet patterns(&getContext());
+  patterns.add</*IntegerOpLowering, FloatOpLowering, DoubleOpLowering,*/
                   AddOpLowering, CastOpLowering, AddFOpLowering, SubOpLowering,
                   SubFOpLowering, MulOpLowering, MulFOpLowering, DivSOpLowering,
                   DivUOpLowering, DivFOpLowering, ModSOpLowering,
                   ModUOpLowering, ModFOpLowering, AndOpLowering, OrOpLowering,
-                  XorUOpLowering, CallOpLowering>(&getContext());
+                  XorUOpLowering/*, CallOpLowering*/>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`
   // operations were not converted successfully.
-  if (failed(applyPartialConversion(getFunction(), target, patterns)))
+  if (failed(applyPartialConversion(getFunction(), target,
+                                    std::move(patterns))))
     signalPassFailure();
 }
 

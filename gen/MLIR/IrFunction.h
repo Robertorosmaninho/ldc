@@ -34,11 +34,15 @@
 #include "ir/irfunction.h"
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Module.h"
-#include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/AsmState.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/Verifier.h"
+#include "mlir/InitAllDialects.h"
+#include "mlir/IR/TypeSupport.h"
 #include "mlir/IR/Types.h"
 
 #include "llvm/ADT/ScopedHashTable.h"
@@ -125,7 +129,7 @@ public:
 
   /// Set MLIR Location using D Loc info
   mlir::Location loc(Loc loc) {
-    return builder.getFileLineColLoc(
+    return mlir::FileLineColLoc::get(
         builder.getIdentifier(StringRef(loc.filename)), loc.linnum,
         loc.charnum);
   }

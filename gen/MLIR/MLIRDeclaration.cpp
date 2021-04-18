@@ -21,7 +21,7 @@ MLIRDeclaration::MLIRDeclaration(
 
 MLIRDeclaration::~MLIRDeclaration() = default;
 
-mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(Expression *exp) {
+/*mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(Expression *exp) {
   // The type of this attribute is tensor of 64-bit floating-point with no
   // shape.
   auto type = get_MLIRtype(exp);
@@ -45,8 +45,8 @@ mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(Expression *exp) {
   _miss++;
   fatal();
 }
-
-std::pair<mlir::ArrayAttr, mlir::Type>
+*/
+/*std::pair<mlir::ArrayAttr, mlir::Type>
 MLIRDeclaration::getConstantAttr(StructLiteralExp *lit) {
 
   /// Emit a constant for a struct literal. It will be emitted as an array of
@@ -158,18 +158,18 @@ StructDeclaration *MLIRDeclaration::getStructFor(Expression *expression) {
   if (structIt == structMap.end())
     return nullptr;
   return structIt->second.second;
-}
+}*/
 
 mlir::Value MLIRDeclaration::mlirGen(Declaration *declaration) {
   IF_LOG Logger::println("MLIRCodeGen - Declaration: '%s'",
                          declaration->toChars());
   LOG_SCOPE
 
-  if (StructDeclaration *structDeclaration =
+  /*if (StructDeclaration *structDeclaration =
           declaration->isStructDeclaration()) {
     if (failed(mlirGen(structDeclaration, 0)))
       return nullptr;
-  } else if (auto varDeclaration = declaration->isVarDeclaration()) {
+  } else */if (auto varDeclaration = declaration->isVarDeclaration()) {
     return mlirGen(varDeclaration);
   } else {
     IF_LOG Logger::println("Unable to recoganize Declaration: '%s'",
@@ -179,7 +179,7 @@ mlir::Value MLIRDeclaration::mlirGen(Declaration *declaration) {
   }
 }
 
-mlir::LogicalResult
+/*mlir::LogicalResult
 MLIRDeclaration::mlirGen(StructDeclaration *structDeclaration, bool generated) {
   IF_LOG Logger::println("MLIRCodeGen - StructDeclaration: '%s'",
                          structDeclaration->toChars());
@@ -244,7 +244,7 @@ MLIRDeclaration::mlirGen(StructDeclaration *structDeclaration, bool generated) {
   declare(structDeclaration->toChars(), Struct);
 
   return mlir::success();
-}
+}*/
 
 mlir::Value MLIRDeclaration::mlirGen(VarDeclaration *vd) {
   IF_LOG Logger::println("MLIRCodeGen - VarDeclaration: '%s'", vd->toChars());
@@ -318,7 +318,7 @@ mlir::Value MLIRDeclaration::DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
 mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp,
                                      AddAssignExp *addAssignExp) {
   mlir::Value e1, e2, result;
-  mlir::Location *location = nullptr;
+ /* mlir::Location *location = nullptr;
 
   if (addAssignExp) {
     IF_LOG Logger::println(
@@ -353,14 +353,14 @@ mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp,
     _miss++;
     return nullptr;
   }
-
+*/
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp,
                                      AndAssignExp *andAssignExp) {
   mlir::Value e1, e2, result;
-  mlir::Location *location = nullptr;
+  /*mlir::Location *location = nullptr;
 
   if (andAssignExp) {
     IF_LOG Logger::println(
@@ -393,13 +393,13 @@ mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp,
   } else {
     _miss++;
     return nullptr;
-  }
+  }*/
 
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp) {
-  IF_LOG Logger::println("MLIRCodeGen - ArrayLiteralExp: '%s'",
+ /* IF_LOG Logger::println("MLIRCodeGen - ArrayLiteralExp: '%s'",
                          arrayLiteralExp->toChars());
   LOG_SCOPE
   _total++;
@@ -466,18 +466,19 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp) {
   // tensor literal and build the operation.
   if (elementType.isInteger(size)) {
     auto dataAttributes = mlir::DenseElementsAttr::get(dataType, data);
-    return builder.create<mlir::D::IntegerOp>(Loc, dataAttributes);
+    return builder.create<mlir::D::IntegerOp>(Loc, dataType, dataAttributes);
   } else if (isFloat) {
     auto dataAttributes = mlir::DenseElementsAttr::get(dataType, dataF);
     if (elementType.isF64())
-      return builder.create<mlir::D::DoubleOp>(Loc, dataAttributes);
+      return builder.create<mlir::D::DoubleOp>(Loc, dataType,
+                                               dataAttributes);
     else
-      return builder.create<mlir::D::FloatOp>(Loc, dataAttributes);
+      return builder.create<mlir::D::FloatOp>(Loc, dataType, dataAttributes);
   } else {
     _miss++;
     Logger::println("Unable to build ArrayLiteralExp: '%s'",
                     arrayLiteralExp->toChars());
-  }
+  }*/
   return nullptr;
 }
 
@@ -487,7 +488,8 @@ mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp) {
       "AssignExp::toElem: %s | (%s)(%s = %s)\n", assignExp->toChars(),
       assignExp->type->toChars(), assignExp->e1->type->toChars(),
       assignExp->e2->type ? assignExp->e2->type->toChars() : nullptr);
-  if (assignExp->memset & referenceInit) {
+  if (static_cast<int>(assignExp->memset) & static_cast<int>
+      (MemorySet::referenceInit)) {
     assert(assignExp->op == TOKconstruct || assignExp->op == TOKblit);
     assert(assignExp->e1->op == TOKvar);
 
@@ -579,7 +581,7 @@ mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp) {
   fatal();
 }
 
-mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
+/*mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
   IF_LOG Logger::println("MLIRCodeGen - CallExp: '%s'", callExp->toChars());
   LOG_SCOPE
   _total++;
@@ -658,7 +660,7 @@ mlir::Value MLIRDeclaration::mlirGen(CallExp *callExp) {
   llvm::ArrayRef<mlir::Type> ret_type(types);
   return builder.create<mlir::D::CallOp>(loc(callExp->loc), functionName,
                                          ret_type, operands);
-}
+}*/
 
 mlir::Value MLIRDeclaration::mlirGen(CastExp *castExp) {
   IF_LOG Logger::print("MLIRCodeGen - CastExp: %s @ %s\n", castExp->toChars(),
@@ -729,9 +731,9 @@ mlir::Value MLIRDeclaration::mlirGen(DeclarationExp *decl_exp) {
 
   if (VarDeclaration *vd = dsym->isVarDeclaration())
     return mlirGen(vd);
-  else if (StructDeclaration *structDeclaration = dsym->isStructDeclaration())
+  /*else if (StructDeclaration *structDeclaration = dsym->isStructDeclaration())
     if (failed(mlirGen(structDeclaration, 0)))
-      return nullptr;
+      return nullptr;*/
 
   IF_LOG Logger::println("Unable to recoganize DeclarationExp: '%s'",
                          dsym->toChars());
@@ -742,7 +744,7 @@ mlir::Value MLIRDeclaration::mlirGen(DeclarationExp *decl_exp) {
 mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp,
                                      DivAssignExp *divAssignExp) {
   mlir::Value e1, e2, result;
-  mlir::Location *location = nullptr;
+ /* mlir::Location *location = nullptr;
   bool isSigned = true;
 
   if (divAssignExp) {
@@ -788,7 +790,7 @@ mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp,
     _miss++;
     return nullptr;
   }
-
+*/
   return result;
 }
 
@@ -812,7 +814,7 @@ mlir::Value MLIRDeclaration::mlirGen(DotVarExp *dotVarExp) {
       // arrptr = DtoIndexAggregate(DtoRVal(l), ts->sym, vd);
     }
     // indexing normal struct
-    else if (e1type->ty == Tstruct) {
+    /*else if (e1type->ty == Tstruct) {
 //      auto *ts = static_cast<TypeStruct *>(e1type);
       llvm::Optional<size_t> accessIndex = getMemberIndex(dotVarExp);
       if (!accessIndex) {
@@ -822,7 +824,7 @@ mlir::Value MLIRDeclaration::mlirGen(DotVarExp *dotVarExp) {
       auto lhs = mlirGen(dotVarExp->e1);
       return builder.create<mlir::D::StructAccessOp>(location, lhs,
                                                      *accessIndex);
-    }
+    }*/
     // indexing class
     else if (e1type->ty == Tclass) {
       TypeClass *tc = static_cast<TypeClass *>(e1type);
@@ -931,7 +933,8 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, int func) {
 }
 
 mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp) {
-  _total++;
+  return nullptr;
+ /* _total++;
   dinteger_t dint = integerExp->value;
   Logger::println("MLIRGen - Integer: '%lu'", dint);
   mlir::Location location = builder.getUnknownLoc();
@@ -965,13 +968,14 @@ mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp) {
     _miss++;
     fatal();
   }
-  return builder.create<mlir::D::IntegerOp>(location, dataAttribute);
+  return builder.create<mlir::D::IntegerOp>(location, shapedType,
+                                            dataAttribute);*/
 }
 
 mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp,
                                      MinAssignExp *minAssignExp) {
   mlir::Value e1, e2, result;
-  mlir::Location *location = nullptr;
+ /* mlir::Location *location = nullptr;
 
   if (minAssignExp) {
     IF_LOG Logger::println(
@@ -1008,14 +1012,14 @@ mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp,
     _miss++;
     return nullptr;
   }
-
+*/
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(ModExp *modExp,
                                      ModAssignExp *modAssignExp) {
   mlir::Value e1, e2, result;
-  mlir::Location *location = nullptr;
+ /* mlir::Location *location = nullptr;
   bool isSigned = true;
 
   if (modAssignExp) {
@@ -1061,14 +1065,14 @@ mlir::Value MLIRDeclaration::mlirGen(ModExp *modExp,
     _miss++;
     return nullptr;
   }
-
+*/
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp,
                                      MulAssignExp *mulAssignExp) {
   mlir::Value e1, e2, result;
-  mlir::Location *location = nullptr;
+  /*mlir::Location *location = nullptr;
 
   if (mulAssignExp) {
     IF_LOG Logger::println(
@@ -1107,13 +1111,13 @@ mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp,
     _miss++;
     return nullptr;
   }
-
+*/
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp) {
   mlir::Value e1, e2, result;
-  mlir::Location *location = nullptr;
+ /* mlir::Location *location = nullptr;
 
   if (orAssignExp) {
     IF_LOG Logger::println(
@@ -1147,12 +1151,12 @@ mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp) {
     _miss++;
     return nullptr;
   }
-
+*/
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp) {
-  IF_LOG Logger::print("MLIRGen - PostExp: %s @ %s\n", postExp->toChars(),
+ /* IF_LOG Logger::print("MLIRGen - PostExp: %s @ %s\n", postExp->toChars(),
                        postExp->type->toChars());
   LOG_SCOPE;
 
@@ -1172,11 +1176,11 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp) {
   auto shapedType = mlir::RankedTensorType::get({}, e1.getType());
   auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, 1);
   if (e1.getType().isF32() || e1.getType().isF16())
-    e2 = builder.create<mlir::D::FloatOp>(location, dataAttribute);
+    e2 = builder.create<mlir::D::FloatOp>(location, shapedType, dataAttribute);
   else if (e1.getType().isF64())
-    e2 = builder.create<mlir::D::DoubleOp>(location, dataAttribute);
+    e2 = builder.create<mlir::D::DoubleOp>(location, shapedType, dataAttribute);
   else
-    e2 = builder.create<mlir::D::IntegerOp>(location, dataAttribute);
+    e2 = builder.create<mlir::D::IntegerOp>(location, shapedType, dataAttribute);
 
   if (postExp->op == TOKplusplus) {
     if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
@@ -1189,12 +1193,12 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp) {
     else
       return builder.create<mlir::D::SubOp>(location, e1, e2);
   }
-  _miss++;
+  _miss++;*/
   return nullptr;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(RealExp *realExp) {
-  _total++;
+ /* _total++;
   real_t dfloat = realExp->value;
   IF_LOG Logger::println("MLIRCodeGen - RealExp: '%Lf'", dfloat);
   mlir::Location Loc = loc(realExp->loc);
@@ -1202,7 +1206,8 @@ mlir::Value MLIRDeclaration::mlirGen(RealExp *realExp) {
   if (type.isF64())
     return builder.create<mlir::D::DoubleOp>(Loc, type, dfloat);
   else
-    return builder.create<mlir::D::FloatOp>(Loc, type, dfloat);
+    return builder.create<mlir::D::FloatOp>(Loc, type, dfloat);*/
+ return nullptr;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(StringExp *stringExp) {
@@ -1217,7 +1222,7 @@ mlir::Value MLIRDeclaration::mlirGen(StringExp *stringExp) {
   return builder.createOperation(result)->getResult(0);
 }
 
-mlir::Value MLIRDeclaration::mlirGen(StructLiteralExp *structLiteralExp) {
+/*mlir::Value MLIRDeclaration::mlirGen(StructLiteralExp *structLiteralExp) {
   IF_LOG Logger::println("MLIRCodeGen - StructLiteralExp: '%s'",
                          structLiteralExp->toChars());
 
@@ -1229,7 +1234,7 @@ mlir::Value MLIRDeclaration::mlirGen(StructLiteralExp *structLiteralExp) {
   // `StructConstantOp::build` method.
   return builder.create<mlir::D::StructConstantOp>(loc(structLiteralExp->loc),
                                                    dataType, dataAttr);
-}
+}*/
 
 mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp) {
   _total++;
@@ -1261,14 +1266,14 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp) {
     // TODO: return toElem(em->value(), p) -> Expression, bool
   }
 
-  mlir::Type type = get_MLIRtype(varExp, varExp->type);
+  /*mlir::Type type = get_MLIRtype(varExp, varExp->type);
   if (type.isIntOrFloat()) {
     IF_LOG Logger::println("Undeclared VarExp: '%s' | '%u'", varExp->toChars(),
                            varExp->op);
     auto shapedType =
         mlir::RankedTensorType::get(1, builder.getIntegerType(32));
     auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, 0);
-    return builder.create<mlir::D::IntegerOp>(loc(varExp->loc), dataAttribute);
+    return builder.create<mlir::D::IntegerOp>(loc(varExp->loc), shapedType, dataAttribute);
   } else if (varExp->type->ty == Tstruct) {
     if (StructLiteralExp *sle = varExp->isStructLiteralExp()) {
       return mlirGen(sle);
@@ -1282,7 +1287,7 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp) {
       mlirGen(structDecl.second, 1);
 
     return symbolTable.lookup(varExp->var->toChars());
-  }
+  }*/
 
   return DtoMLIRSymbolAddress(loc(varExp->loc), varExp->type, varExp->var);
 }
@@ -1365,7 +1370,7 @@ mlir::Value MLIRDeclaration::DtoMLIRSymbolAddress(mlir::Location loc,
 mlir::Value MLIRDeclaration::mlirGen(XorExp *xorExp,
                                      XorAssignExp *xorAssignExp) {
   mlir::Value e1, e2, result;
-  mlir::Location *location = nullptr;
+/*  mlir::Location *location = nullptr;
 
   if (xorAssignExp) {
     IF_LOG Logger::println(
@@ -1399,7 +1404,7 @@ mlir::Value MLIRDeclaration::mlirGen(XorExp *xorExp,
     _miss++;
     return nullptr;
   }
-
+*/
   return result;
 }
 
@@ -1424,27 +1429,19 @@ void MLIRDeclaration::mlirGen(TemplateInstance *decl) {
     return;
   }
 
-  // Force codegen if this is a templated function with pragma(inline, true).
-  if ((decl->members->length == 1) &&
-      ((*decl->members)[0]->isFuncDeclaration()) &&
-      ((*decl->members)[0]->isFuncDeclaration()->inlining == PINLINEalways)) {
-    Logger::println("needsCodegen() == false, but function is marked with "
-                    "pragma(inline, true), so it really does need "
-                    "codegen.");
-  } else {
-    // FIXME: This is #673 all over again.
-    if (!decl->needsCodegen()) {
+  // FIXME: This is #673 all over again.
+  if (!global.params.linkonceTemplates && !decl->needsCodegen()) {
       Logger::println("Does not need codegen, skipping.");
       return;
-    }
-    if (/*irState->dcomputetarget && */ (decl->tempdecl == Type::rtinfo ||
+  }
+
+  if (/*irState->dcomputetarget && */ (decl->tempdecl == Type::rtinfo ||
                                          decl->tempdecl == Type::rtinfoImpl)) {
       // Emitting object.RTInfo(Impl) template instantiations in dcompute
       // modules would require dcompute support for global variables.
       Logger::println("Skipping object.RTInfo(Impl) template instantiations "
                       "in dcompute modules.");
       return;
-    }
   }
 
   for (auto &m : *decl->members) {
@@ -1498,7 +1495,7 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression,
   } else if (LogicalExp *logicalExp = expression->isLogicalExp()) {
     _miss++;
     return nullptr; // add mlirGen(logicalExp); //needs to implement with blocks
-  } else if (expression->isAddExp() || expression->isAddAssignExp())
+  } /*else if (expression->isAddExp() || expression->isAddAssignExp())
     return mlirGen(expression->isAddExp(), expression->isAddAssignExp());
   else if (expression->isMinExp() || expression->isMinAssignExp())
     return mlirGen(expression->isMinExp(), expression->isMinAssignExp());
@@ -1518,11 +1515,11 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression,
     auto Struct = mlirGen(expression->isBlitExp()->e2);
     declare(expression->isBlitExp()->e1->toChars(), Struct);
     return Struct;
-  } else if (expression->isStructLiteralExp()) {
-    return mlirGen(expression->isStructLiteralExp());
+  //} else if (expression->isStructLiteralExp()) {
+ //   return mlirGen(expression->isStructLiteralExp());
   } else if (DotVarExp *dotVarExp = expression->isDotVarExp()) {
     return mlirGen(dotVarExp);
-  }
+  }*/
 
   _miss++;
   IF_LOG Logger::println("Unable to recoganize the Expression: '%s' : '%u': "

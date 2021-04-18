@@ -14,17 +14,19 @@
 #ifndef D_OPS
 #define D_OPS
 
-include "mlir/IR/OpBase.td"
-include "mlir/IR/OpAsmInterface.td"
-//include "mlir/Interfaces/CallInterfaces.td"
-//include "mlir/Interfaces/ControlFlowInterfaces.td"
-//include "mlir/Interfaces/SideEffects.td"
-
+include "mlir/Interfaces/CallInterfaces.td"
+include "mlir/Interfaces/CastInterfaces.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 // Provide a definition of the 'D' dialect in the ODS framework so that we
+
 // can define our operations.
 def D_Dialect : Dialect {
   let name = "D";
-  let cppNamespace = "D";
+
+  let summary = "Summary"; //#TODO
+  let description = [{Description}]; //#TODO
+
+  let cppNamespace = "::mlir::D";
 }
 
 // Base class for D dialect operations. This operation inherits from the base
@@ -35,123 +37,47 @@ def D_Dialect : Dialect {
 class D_Op<string mnemonic, list<OpTrait> traits = []> :
      Op<D_Dialect, mnemonic, traits>;
 
-// Provide a definition for the D StructType for use in ODS. This allows for
-// using StructType in a similar way to Tensor or MemRef.
-def D_StructType :
-    Type<CPred<"$_self.isa<StructType>()">, "D struct type">;
-
-// Provide a definition of the types that are used within the D dialect.
-def D_Type : AnyTypeOf<[AnyType, D_StructType]>;
-
-////////////////////////////////////////////////////////////////////////////////
-// Struct Operations
-////////////////////////////////////////////////////////////////////////////////
-
-def StructAccessOp : D_Op<"struct_access", [NoSideEffect]> {
-  let summary = "struct access";
-  let description = [{
-    Access the Nth element of a value returning a struct type.
-  }];
-
-  let arguments = (ins D_StructType:$input, I64Attr:$index);
-  let results = (outs D_Type);
-
-  // Allow building a StructAccessOp with just a struct value and an index.
-  let builders = [
-    OpBuilder<"Builder *b, OperationState &state, Value input, size_t index">
-  ];
-
-  let verifier = [{ return ::verify(*this); }];
-
-  // Set the folder bit so that we can fold constant accesses.
-  let hasFolder = 1;
-
-}
-
-def StructConstantOp : D_Op<"struct_constant", [NoSideEffect]> {
-  let summary = "struct constant";
-  let description = [{
-    Constant operation turns a literal struct value into an SSA value. The data
-    is attached to the operation as an attribute. The struct constant is encoded
-    as an array of other constant values. For example:
-
-    ```mlir
-      %0 = "D.struct_constant"() {
-        value = [dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf64>]
-      } : () -> !D.struct<tensor<*xf64>>
-    ```
-  }];
-
-  let arguments = (ins ArrayAttr:$value);
-  let results = (outs D_StructType);
-  let verifier = [{ return ::verify(*this); }];
-  let hasFolder = 1;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Binary Operations
-////////////////////////////////////////////////////////////////////////////////
-
-// Base class for standard arithmetic operations.  Requires operands and
-// results to be of the same type, but does not constrain them to specific
-// types.  Individual classes will have `lhs` and `rhs` accessor to operands.
-class ArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
-    Op<D_Dialect, mnemonic,
-       !listconcat(traits, [NoSideEffect, SameOperandsAndResultType])> {
-
-  let results = (outs AnyType);
-
-}
-
-// Base class for standard arithmetic operations on integers, vectors and
-// tensors thereof.  This operation takes two operands and returns one result,
-// each of these is required to be of the same type.  This type may be an
-// integer scalar type, a vector whose element type is an integer type, or an
-// integer tensor.  The custom assembly form of the operation is as follows
-//
-//     <op>i %0, %1 : i32
-class IntArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
-    ArithmeticOp<mnemonic, traits>,
-    Arguments<(ins AnyType:$lhs, AnyType:$rhs)>;
-
-// Base class for standard arithmetic binary operations on floats, vectors and
-// tensors thereof.  This operation has two operands and returns one result,
-// each of these is required to be of the same type.  This type may be a
-// floating point scalar type, a vector whose element type is a floating point
-// type, or a floating point tensor.  The custom assembly form of the operation
-// is as follows
-//
-//     <op>f %0, %1 : f32
-class FloatArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
-    ArithmeticOp<mnemonic, traits>,
-    Arguments<(ins FloatLike:$lhs, FloatLike:$rhs)>;
-
 //===----------------------------------------------------------------------===//
 // AddOp
 //===----------------------------------------------------------------------===//
 
-def AddOp : IntArithmeticOp<"add", [Commutative]> {
+def AddOp : D_Op<"add", [NoSideEffect, Commutative]> {
     let summary = "element-wise addition operation";
     let description = [{
         The "add" operation performs element-wise addition between two
         integer values.
         The type of the value operands are expected to match.
     }];
+
+    let arguments = (ins AnyType:$lhs, AnyType:$rhs);
+    let results = (outs AnyType);
+
+    let builders = [
+        OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+     ];
 }
 
 // AddFOp FloatLike infers the size of float
 
-def AddFOp : FloatArithmeticOp<"fadd"> {
+def AddFOp : D_Op<"add", [NoSideEffect, Commutative]> {
     let summary = "element-wise addition operation";
     let description = [{
         The "addf" operation performs element-wise addition between two values.
         The type of the value operands are expected to match.
     }];
+
+    let arguments = (ins AnyType:$lhs, AnyType:$rhs);
+    let results = (outs AnyType);
+
+    let builders = [
+        OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+    ];
 }
 
-// SubOp IntegerLike infers the size of int
 
-def SubOp : D_Op<"sub"> {
+// SubOp SignlessIntegerLike infers the size of int
+
+def SubOp : D_Op<"sub", [NoSideEffect]> {
     let summary = "element-wise subtraction operation";
     let description = [{
         The "sub" operation performs element-wise subtraction between two
@@ -159,12 +85,12 @@ def SubOp : D_Op<"sub"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+    let results = (outs SignlessIntegerLike);
 
     // Allow building an SubOp with from the two input operands.
     let builders = [
-      OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+      OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
     ];
 }
 
@@ -183,7 +109,7 @@ def SubFOp : D_Op<"fsub"> {
 
     // Allow building an SubFOp with from the two input operands.
     let builders = [
-      OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+      OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
     ];
 }
 
@@ -194,12 +120,12 @@ def MulOp : D_Op<"mul"> {
     operands. The type of operands are expected to match.
   }];
 
-  let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-  let results = (outs IntegerLike);
+  let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+  let results = (outs SignlessIntegerLike);
 
   // Allow building a MulOp with from the two input operands.
   let builders = [
-    OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
   ];
 }
 
@@ -215,7 +141,7 @@ def MulFOp : D_Op<"fmul"> {
 
   // Allow building a MulOp with from the two input operands.
   let builders = [
-    OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
   ];
 }
 
@@ -228,12 +154,12 @@ def DivSOp : D_Op<"sdiv"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+    let results = (outs SignlessIntegerLike);
 
    // Allow building a DivSOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -246,12 +172,12 @@ def DivUOp : D_Op<"udiv"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+    let results = (outs SignlessIntegerLike);
 
    // Allow building a DivUOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -269,7 +195,7 @@ def DivFOp : D_Op<"fdiv"> {
 
    // Allow building a DivIOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -282,12 +208,12 @@ def ModSOp : D_Op<"srem"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+    let results = (outs SignlessIntegerLike);
 
    // Allow building a ModSOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -300,12 +226,12 @@ def ModUOp : D_Op<"urem"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+    let results = (outs SignlessIntegerLike);
 
    // Allow building a ModUOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -323,7 +249,7 @@ def ModFOp : D_Op<"frem"> {
 
    // Allow building a ModFOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -335,12 +261,12 @@ def AndOp : D_Op<"and"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+    let results = (outs SignlessIntegerLike);
 
    // Allow building a AndOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -352,12 +278,12 @@ def OrOp : D_Op<"or"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+    let results = (outs SignlessIntegerLike);
 
    // Allow building a OrOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -370,19 +296,19 @@ def XorOp : D_Op<"xor"> {
         The type of the value operands are expected to match.
     }];
 
-    let arguments = (ins IntegerLike:$lhs, IntegerLike:$rhs);
-    let results = (outs IntegerLike);
+    let arguments = (ins SignlessIntegerLike:$lhs, SignlessIntegerLike:$rhs);
+    let results = (outs SignlessIntegerLike);
 
    // Allow building a XorOp with from the two input operands.
      let builders = [
-       OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Call Operation
 ////////////////////////////////////////////////////////////////////////////////
-def CallOp : D_Op<"call"> {
+/*def CallOp : D_Op<"call"> {
     let summary = "generic call operation";
     let description = [{
         Generic calls represent calls to a user defined function that was
@@ -410,17 +336,17 @@ def CallOp : D_Op<"call"> {
 
     // Add custom build methods for the call operation.
     let builders = [
-        OpBuilder<"Builder *builder, OperationState &state, "
-                  "StringRef callee, ArrayRef<Type> types, "
-                  "ArrayRef<Value> arguments">
+        OpBuilder<(ins "StringRef":$callee,
+                          "ArrayRef<Type> types":$types,
+                          "ArrayRef<Value>":$arguments)>
     ];
 }
-
+*/
 ////////////////////////////////////////////////////////////////////////////////
 // Constant/Literal Declaration Ops
 ////////////////////////////////////////////////////////////////////////////////
 
-def IntegerOp : D_Op<"int", [NoSideEffect]> {
+/*def IntegerOp : D_Op<"int", [NoSideEffect]> {
   let summary = "Integer Declaration";
   let description = [{
     IntegerOp operation turns a literal into an SSA value. The data is attached
@@ -439,12 +365,11 @@ def IntegerOp : D_Op<"int", [NoSideEffect]> {
 
   let builders = [
     // Build a constant with a given constant integer value.
-    OpBuilder<"Builder *builder, OperationState &state, "
-              "Type type, int value, int size">,
+    OpBuilder<(ins "Type":$type, "int":$value, "int":$size)>,
 
-    OpBuilder<
-        "Builder *builder, OperationState &result, Attribute value",
-        [{ build(builder, result, value.getType(), value); }]>
+   // OpBuilder<
+   //     "Builder *builder, OperationState &result, Attribute value",
+   //     [{ build(builder, result, value.getType(), value); }]>
   ];
 
   let hasFolder = 1;
@@ -474,13 +399,12 @@ def FloatOp : D_Op<"float", [NoSideEffect]> {
   // used when using `builder.create<FloatOp>(...)`.
   let builders = [
     // Build a constant with a given constant float value.
-    OpBuilder<"Builder *builder, OperationState &state, "
-              "Type type, float value">,
+    OpBuilder<(ins "Type":$type, "float":$value)>
 
     // Build a float with a given value.
-    OpBuilder<
-         "Builder *builder, OperationState &result, Attribute value",
-         [{ build(builder, result, value.getType(), value); }]>
+    // OpBuilder<
+    //      "Builder *builder, OperationState &result, Attribute value",
+    //      [{ build(builder, result, value.getType(), value); }]>
   ];
 
    let hasFolder = 1;
@@ -508,18 +432,17 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
   // used when using `builder.create<DoubleOp>(...)`.
   let builders = [
     // Build a constant with a given constant double value.
-    OpBuilder<"Builder *builder, OperationState &state, "
-              "Type type, double value">,
+    OpBuilder<(ins "Type":$type, "double":$value)>
 
     // Build a double with a given value.
-    OpBuilder<
-            "Builder *builder, OperationState &result, Attribute value",
-            [{ build(builder, result, value.getType(), value); }]>
+    //OpBuilder<
+    //        "Builder *builder, OperationState &result, Attribute value",
+    //        [{ build(builder, result, value.getType(), value); }]>
   ];
 
    let hasFolder = 1;
 }
-
+*/
 ////////////////////////////////////////////////////////////////////////////////
 // Cast Operations
 ////////////////////////////////////////////////////////////////////////////////
@@ -536,11 +459,16 @@ def CastOp : D_Op<"cast"> {
   let arguments = (ins AnyTypeOf<[AnyType, AnyMemRef]>:$input);
   let results = (outs AnyType:$output);
 
-  let builders = [OpBuilder<
-    "Builder *builder, OperationState &result, Value value, Type destType", [{
-      result.addOperands(value);
-      result.addTypes(destType);
-  }]>];
+    let builders = [OpBuilder<(ins "Value":$value, "Type":$destType), [{
+     build($_builder, $_state, destType, value);
+     }]>];
+
+//  let builders = [OpBuilder<
+//    "Builder *builder, OperationState &result, Value value, Type destType", [{
+//      result.addOperands(value);
+//      result.addTypes(destType);
+//  }]>];
 }
+
 
 #endif // D_OPS

@@ -7,7 +7,7 @@ mlir_tablegen(MLIR
         FLAG
             -gen-op-decls
         SRCS
-            Ops.td)
+            ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)
 mlir_tablegen(MLIR
         TARGET
             CPP
@@ -16,4 +16,15 @@ mlir_tablegen(MLIR
         FLAG
             -gen-op-defs
         SRCS
-            Ops.td)
+            ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)
+
+mlir_tablegen(MLIR
+        TARGET
+            Dialect
+        OUTS
+            Dialect.h.inc
+        FLAG
+            -gen-dialect-decls
+        SRCS
+            ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)
+

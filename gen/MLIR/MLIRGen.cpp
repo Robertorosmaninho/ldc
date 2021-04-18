@@ -23,14 +23,12 @@
 #include "gen/MLIR/MLIRGen.h"
 #include "gen/MLIR/MLIRStatements.h"
 
-#include "mlir/Analysis/Verifier.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/Function.h"
+#include "mlir/IR/FunctionImplementation.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Module.h"
 #include "mlir/IR/Types.h"
 
 #include "llvm/ADT/STLExtras.h"
@@ -71,10 +69,10 @@ public:
         auto func = mlirGen(fd);
         if (!func)
           fatal();
-        theModule.push_back(func);
-      } else if (StructDeclaration *structDecl = dsym->isStructDeclaration()) {
+        theModule.push_back(func);/*
+      } else if (StructDeclaration *structDecl = dsym->isStructDeclaration* ()) {
         if (failed(declaration.mlirGen(structDecl, 0)))
-          fatal();
+          fatal();*/
       } else if (dsym->isInstantiated()) {
         IF_LOG Logger::println("isTemplateInstance: '%s'",
                                dsym->isTemplateInstance()->toChars());
@@ -150,7 +148,7 @@ private:
   unsigned total = 0, miss = 0;
 
   mlir::Location loc(Loc loc) {
-    return builder.getFileLineColLoc(
+    return mlir::FileLineColLoc::get(
         builder.getIdentifier(StringRef(loc.filename)), loc.linnum,
         loc.charnum);
   }
@@ -220,7 +218,7 @@ private:
 
     MLIRFunction FuncDecl(Fd, context, builder, symbolTable, structMap, total,
                           miss);
-    mlir::Type type = FuncDecl.DtoMLIRFunctionType(Fd, nullptr, nullptr);
+    mlir::Type type = FuncDecl.DtoMLIRFunctionType(Fd);
 
     // Create an MLIR function for the given prototype.
     mlir::FuncOp function(mlirGen(Fd, true));

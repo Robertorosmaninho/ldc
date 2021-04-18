@@ -8,33 +8,24 @@
 //===----------------------------------------------------------------------===//
 #if LDC_MLIR_ENABLED
 
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "gen/MLIR/Dialect.h"
 #include "gen/logger.h"
 
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/Types.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/BuiltinTypes.h"
 
 using namespace mlir;
-using namespace D;
+using namespace mlir::D;
 
-//===----------------------------------------------------------------------===//
-// DDialect
-//===----------------------------------------------------------------------===//
 
-/// Dialect creation, the instance will be owned by the context. This is the
-/// point of registration of custom types and operations for the dialect.
-DDialect::DDialect(MLIRContext *context) : Dialect("D", context) {
-  addOperations<
-#define GET_OP_LIST
-#include "Ops.cpp.inc"
-      >();
-  addTypes<StructType>();
-}
 
-Operation *DDialect::materializeConstant(OpBuilder &builder, Attribute value,
+/*Operation *DDialect::materializeConstant(OpBuilder &builder, Attribute value,
                                          Type type, Location loc) {
   Type originalType = type;
   Operation *op = nullptr;
@@ -57,14 +48,14 @@ Operation *DDialect::materializeConstant(OpBuilder &builder, Attribute value,
                                       value.cast<DenseElementsAttr>());
 
   return op;
-}
+}*/
 
 //===----------------------------------------------------------------------===//
 // D Operations
 //===----------------------------------------------------------------------===//
 
 /// Verify that the given attribute value is valid for the given type.
-static LogicalResult verifyConstantForType(Type type, Attribute opaqueValue,
+/*static LogicalResult verifyConstantForType(Type type, Attribute opaqueValue,
                                            Operation *op) {
   if (type.isa<TensorType>()) {
     // Check that the value is a elements attribute.
@@ -281,11 +272,12 @@ void DDialect::printType(Type type, DialectAsmPrinter &printer) const {
   interleaveComma(structType.getElementTypes(), printer);
   printer << '>';
 }
-
+*/
 //===----------------------------------------------------------------------===//
 // Dialect Ops
 
-void D::SubOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
+/*void D::SubOp::build(Builder *b, OperationState &state, Value lhs, Value
+ * rhs) {
   if (lhs.getType() == rhs.getType())
     state.addTypes(lhs.getType());
   else
@@ -433,16 +425,27 @@ void D::DoubleOp::build(Builder *builder, OperationState &state, Type type,
   } else {
     IF_LOG Logger::println("Unable to get the Attribute for %f", value);
   }
-}
+}*/
 
 //===----------------------------------------------------------------------===//
 // TableGen'd op method definitions
 //===----------------------------------------------------------------------===//
 
 #define GET_OP_CLASSES
-namespace mlir {
-namespace D {
 #include "Ops.cpp.inc"
+
+//===----------------------------------------------------------------------===//
+// DDialect
+//===----------------------------------------------------------------------===//
+
+/// Dialect creation, the instance will be owned by the context. This is the
+/// point of registration of custom types and operations for the dialect.
+void DDialect::initialize() {
+  addOperations<
+#define GET_OP_LIST
+#include "Ops.cpp.inc"
+  >();
+  //addTypes<StructType>();
 }
-}
+
 #endif // LDC_MLIR_ENABLED

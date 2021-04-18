@@ -17,13 +17,17 @@
 #include "Passes.h"
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
-#include "mlir/Conversion/LoopToStandard/ConvertLoopToStandard.h"
+#include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVMPass.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/ADT/Sequence.h"
 
 using namespace mlir;
 
@@ -32,18 +36,22 @@ using namespace mlir;
 //===----------------------------------------------------------------------===//
 
 namespace {
-struct DToLLVMLoweringPass : public ModulePass<DToLLVMLoweringPass> {
-  void runOnModule() final;
+struct DToLLVMLoweringPass : public PassWrapper<DToLLVMLoweringPass,
+                                                OperationPass<ModuleOp>> {
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<LLVM::LLVMDialect, scf::SCFDialect>();
+  }
+  void runOnOperation() final;
 };
 } // end anonymous namespace
 
-void DToLLVMLoweringPass::runOnModule() {
+void DToLLVMLoweringPass::runOnOperation() {
   // The first thing to define is the conversion target. This will define the
   // final target for this lowering. For this lowering, we are only targeting
   // the LLVM dialect.
   ConversionTarget target(getContext());
   target.addLegalDialect<LLVM::LLVMDialect>();
-  target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
+  target.addLegalOp<ModuleOp>();
 
   // During this lowering, we will also be lowering the MemRef types, that are
   // currently being operated on, to a representation in LLVM. Do perform this
@@ -60,9 +68,9 @@ void DToLLVMLoweringPass::runOnModule() {
   // lowerings. Transitive lowering, or A->B->C lowering, is when multiple
   // patterns must be applied to fully transform an illegal operation into a
   // set of legal ones.
-  OwningRewritePatternList patterns;
-  populateAffineToStdConversionPatterns(patterns, &getContext());
-  populateLoopToStdConversionPatterns(patterns, &getContext());
+  RewritePatternSet patterns(&getContext());
+  populateAffineToStdConversionPatterns(patterns);
+  populateLoopToStdConversionPatterns(patterns);
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
 
   // The only remaining operation to lower from the `D` dialect, is the
@@ -71,8 +79,8 @@ void DToLLVMLoweringPass::runOnModule() {
 
   // We want to completely lower to LLVM, so we use a `FullConversion`. This
   // ensures that only legal operations will remain after the conversion.
-  auto module = getModule();
-  if (failed(applyFullConversion(module, target, patterns, &typeConverter)))
+  auto module = getOperation();
+  if (failed(applyFullConversion(module, target, std::move(patterns))))
     signalPassFailure();
 }
 

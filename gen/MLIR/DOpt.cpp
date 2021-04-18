@@ -20,7 +20,7 @@ using namespace mlir;
 using namespace D;
 
 /// Fold integers.
-OpFoldResult IntegerOp::fold(ArrayRef<Attribute> operands) { return value(); }
+/*OpFoldResult IntegerOp::fold(ArrayRef<Attribute> operands) { return value(); }
 
 /// Fold floats.
 OpFoldResult FloatOp::fold(ArrayRef<Attribute> operands) { return value(); }
@@ -42,5 +42,5 @@ OpFoldResult StructAccessOp::fold(ArrayRef<Attribute> operands) {
   size_t elementIndex = index().getZExtValue();
   return structAttr.getValue()[elementIndex];
 }
-
+*/
 #endif

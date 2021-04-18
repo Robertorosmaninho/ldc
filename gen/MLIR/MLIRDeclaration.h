@@ -30,11 +30,10 @@
 #include "gen/MLIR/IrFunction.h"
 #include "gen/MLIR/MLIRGen.h"
 
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Module.h"
-#include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/TypeSupport.h"
 #include "mlir/IR/Types.h"
 
 #include "llvm/ADT/ScopedHashTable.h"
@@ -80,14 +79,14 @@ public:
       unsigned &total, unsigned &miss);
   ~MLIRDeclaration();
 
-  mlir::DenseElementsAttr getConstantAttr(Expression *expression);
+  /*mlir::DenseElementsAttr getConstantAttr(Expression *expression);
   std::pair<mlir::ArrayAttr, mlir::Type>
   getConstantAttr(StructLiteralExp *structLiteralExp);
   llvm::Optional<size_t> getMemberIndex(Expression *expression);
   StructDeclaration *getStructFor(Expression *expression);
-  mlir::Value mlirGen(Declaration *declaration);
+  */mlir::Value mlirGen(Declaration *declaration);/*
   mlir::LogicalResult mlirGen(StructDeclaration *structDeclaration,
-                              bool generated);
+                              bool generated);*/
   mlir::Value mlirGen(VarDeclaration *varDeclaration);
 
   static mlir::Value DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
@@ -105,7 +104,7 @@ public:
                       AndAssignExp *andAssignExp = nullptr);
   mlir::Value mlirGen(ArrayLiteralExp *arrayLiteralExp);
   mlir::Value mlirGen(AssignExp *assignExp); // Not perfect yet
-  mlir::Value mlirGen(CallExp *callExp);
+  //mlir::Value mlirGen(CallExp *callExp);
   mlir::Value mlirGen(CastExp *castExp);
   mlir::Value mlirGen(ConstructExp *constructExp);
   mlir::Value mlirGen(DeclarationExp *declarationExp);
@@ -128,7 +127,7 @@ public:
   mlir::Value mlirGen(PostExp *postExp);
   mlir::Value mlirGen(RealExp *realExp);
   mlir::Value mlirGen(StringExp *stringExp);
-  mlir::Value mlirGen(StructLiteralExp *structLiteralExp);
+  //mlir::Value mlirGen(StructLiteralExp *structLiteralExp);
   mlir::Value mlirGen(VarExp *varExp);
   mlir::Value mlirGen(XorExp *xorExp = nullptr,
                       XorAssignExp *xorAssignExp = nullptr);
@@ -136,7 +135,7 @@ public:
 
   /// Set MLIR Location using D Loc info
   mlir::Location loc(Loc loc) {
-    return builder.getFileLineColLoc(
+    return mlir::FileLineColLoc::get(
         builder.getIdentifier(StringRef(loc.filename)), loc.linnum,
         loc.charnum);
   }
