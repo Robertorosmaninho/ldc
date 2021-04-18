@@ -55,7 +55,7 @@ jobs:
       - name: Install lit
         run: |
           set -euxo pipefail
-          curl -OL https://bootstrap.pypa.io/2.7/get-pip.py
+          curl -OL https://bootstrap.pypa.io/pip/2.7/get-pip.py
           python get-pip.py --user
           python -m pip install --user lit
           python -c "import lit.main; lit.main.main();" --version . | head -n 1
@@ -115,8 +115,9 @@ jobs:
             rm tests/d2/dmd-testsuite/runnable/{testptrref,xtest46}_gc.d
             rm tests/d2/dmd-testsuite/fail_compilation/mixin_gc.d
             # The @live tests neither (LDC segfaults)
-            rm tests/d2/dmd-testsuite/compilable/ob1.d
+            rm tests/d2/dmd-testsuite/compilable/ob{1,2}.d
             rm tests/d2/dmd-testsuite/fail_compilation/fob{1,2}.d
+            rm tests/d2/dmd-testsuite/fail_compilation/failob2.d
             # A __traits(getOverloads) test neither
             rm tests/d2/dmd-testsuite/compilable/test21050.d
           fi

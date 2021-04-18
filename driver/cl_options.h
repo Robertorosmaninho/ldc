@@ -90,6 +90,7 @@ extern cl::opt<bool, true> llvmDialect;
 extern cl::opt<bool, true> llvmIr;
 extern cl::opt<bool, true> runJIT;
 extern cl::opt<bool, true> enableOpt;
+extern cl::opt<bool> useDIP25;
 
 // Math options
 extern bool fFastMath;
