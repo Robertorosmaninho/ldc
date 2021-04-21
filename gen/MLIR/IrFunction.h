@@ -129,7 +129,7 @@ public:
 
   /// Set MLIR Location using D Loc info
   mlir::Location loc(Loc loc) {
-    return mlir::FileLineColLoc::get(
+    return builder.getFileLineColLoc(
         builder.getIdentifier(StringRef(loc.filename)), loc.linnum,
         loc.charnum);
   }

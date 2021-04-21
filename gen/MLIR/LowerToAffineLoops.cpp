@@ -17,7 +17,6 @@
 #include "gen/MLIR/Passes.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -38,7 +37,7 @@ static MemRefType convertTensorToMemRef(TensorType type) {
 /// Insert an allocation and deallocation for the given MemRefType.
 static Value insertAllocAndDealloc(MemRefType type, Location loc,
                                    PatternRewriter &rewriter) {
-  auto alloc = rewriter.create<memref::AllocOp>(loc, type);
+  auto alloc = rewriter.create<AllocOp>(loc, type);
 
   // Make sure to allocate at the beginning of the block.
   auto *parentBlock = alloc.getOperation()->getBlock();
@@ -47,7 +46,7 @@ static Value insertAllocAndDealloc(MemRefType type, Location loc,
   // Make sure to deallocate this alloc at the end of the block.
   // TODO: Analyze the impact of it in control flow
   // This is fine as toy functions have no control flow.
-  auto dealloc = rewriter.create<memref::DeallocOp>(loc, alloc);
+  auto dealloc = rewriter.create<DeallocOp>(loc, alloc);
   dealloc.getOperation()->moveBefore(&parentBlock->back());
   return alloc;
 }
@@ -472,7 +471,7 @@ struct CastOpLowering : public OpRewritePattern<D::CastOp> {
 namespace {
 struct DToAffineLoweringPass : public PassWrapper<DToAffineLoweringPass, FunctionPass> {
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<AffineDialect, memref::MemRefDialect, StandardOpsDialect>();
+    registry.insert<AffineDialect, StandardOpsDialect>();
   }
   void runOnFunction() final;
 };
@@ -515,8 +514,7 @@ void DToAffineLoweringPass::runOnFunction() {
 
   // We define the specific operations, or dialects, that are legal targets for
   // this lowering. In our case, we are lowering to `Standard` dialect.
-  target.addLegalDialect<mlir::AffineDialect, memref::MemRefDialect,
-                         mlir::StandardOpsDialect>();
+  target.addLegalDialect<mlir::AffineDialect, mlir::StandardOpsDialect>();
 
   // We also define the Toy dialect as Illegal so that the conversion will fail
   // if any of these operations are *not* converted. If we actually want
@@ -529,8 +527,8 @@ void DToAffineLoweringPass::runOnFunction() {
 
   // Now that the conversion target has been defined, we just need to provide
   // the set of patterns that will lower the Toy operations.
-  RewritePatternSet patterns(&getContext());
-  patterns.add</*IntegerOpLowering, FloatOpLowering, DoubleOpLowering,*/
+  OwningRewritePatternList patterns;
+  patterns.insert</*IntegerOpLowering, FloatOpLowering, DoubleOpLowering,*/
                   AddOpLowering, CastOpLowering, AddFOpLowering, SubOpLowering,
                   SubFOpLowering, MulOpLowering, MulFOpLowering, DivSOpLowering,
                   DivUOpLowering, DivFOpLowering, ModSOpLowering,

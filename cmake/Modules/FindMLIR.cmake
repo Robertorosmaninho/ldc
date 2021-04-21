@@ -82,92 +82,7 @@ else ()
                # ${MLIR_LIB_DIR}/libLLVMOrcShared.a
                # ${MLIR_LIB_DIR}/libLLVMOrcTargetProcess.a
                # ${MLIR_LIB_DIR}/libLLVMRuntimeDyld.a
-                ${MLIR_LIB_DIR}/libDynamicLibraryLib.a
-                ${MLIR_LIB_DIR}/libExampleIRTransforms.a
-                ${MLIR_LIB_DIR}/libLLVMAggressiveInstCombine.a
-                ${MLIR_LIB_DIR}/libLLVMAnalysis.a
-                ${MLIR_LIB_DIR}/libLLVMAsmParser.a
-                ${MLIR_LIB_DIR}/libLLVMAsmPrinter.a
-                ${MLIR_LIB_DIR}/libLLVMBinaryFormat.a
-                ${MLIR_LIB_DIR}/libLLVMBitReader.a
-                ${MLIR_LIB_DIR}/libLLVMBitWriter.a
-                ${MLIR_LIB_DIR}/libLLVMBitstreamReader.a
-                ${MLIR_LIB_DIR}/libLLVMCFGuard.a
-                ${MLIR_LIB_DIR}/libLLVMCFIVerify.a
-                ${MLIR_LIB_DIR}/libLLVMCodeGen.a
-                ${MLIR_LIB_DIR}/libLLVMCore.a
-                ${MLIR_LIB_DIR}/libLLVMCoroutines.a
-                ${MLIR_LIB_DIR}/libLLVMCoverage.a
-                ${MLIR_LIB_DIR}/libLLVMDWARFLinker.a
-                ${MLIR_LIB_DIR}/libLLVMDebugInfoCodeView.a
-                ${MLIR_LIB_DIR}/libLLVMDebugInfoDWARF.a
-                ${MLIR_LIB_DIR}/libLLVMDebugInfoGSYM.a
-                ${MLIR_LIB_DIR}/libLLVMDebugInfoMSF.a
-                ${MLIR_LIB_DIR}/libLLVMDebugInfoPDB.a
-                ${MLIR_LIB_DIR}/libLLVMDemangle.a
-                ${MLIR_LIB_DIR}/libLLVMDlltoolDriver.a
-                ${MLIR_LIB_DIR}/libLLVMExecutionEngine.a
-                ${MLIR_LIB_DIR}/libLLVMExegesis.a
-                ${MLIR_LIB_DIR}/libLLVMExegesisX86.a
-                ${MLIR_LIB_DIR}/libLLVMExtensions.a
-                ${MLIR_LIB_DIR}/libLLVMFileCheck.a
-                ${MLIR_LIB_DIR}/libLLVMFrontendOpenACC.a
-                ${MLIR_LIB_DIR}/libLLVMFrontendOpenMP.a
-                ${MLIR_LIB_DIR}/libLLVMFuzzMutate.a
-                ${MLIR_LIB_DIR}/libLLVMGlobalISel.a
-                ${MLIR_LIB_DIR}/libLLVMIRReader.a
-                ${MLIR_LIB_DIR}/libLLVMInstCombine.a
-                ${MLIR_LIB_DIR}/libLLVMInstrumentation.a
-                ${MLIR_LIB_DIR}/libLLVMInterfaceStub.a
-                ${MLIR_LIB_DIR}/libLLVMInterpreter.a
-                ${MLIR_LIB_DIR}/libLLVMJITLink.a
-                ${MLIR_LIB_DIR}/libLLVMLTO.a
-                ${MLIR_LIB_DIR}/libLLVMLibDriver.a
-                ${MLIR_LIB_DIR}/libLLVMLineEditor.a
-                ${MLIR_LIB_DIR}/libLLVMLinker.a
-                ${MLIR_LIB_DIR}/libLLVMMC.a
-                ${MLIR_LIB_DIR}/libLLVMMCA.a
-                ${MLIR_LIB_DIR}/libLLVMMCDisassembler.a
-                ${MLIR_LIB_DIR}/libLLVMMCJIT.a
-                ${MLIR_LIB_DIR}/libLLVMMCParser.a
-                ${MLIR_LIB_DIR}/libLLVMMIRParser.a
-                ${MLIR_LIB_DIR}/libLLVMObjCARCOpts.a
-                ${MLIR_LIB_DIR}/libLLVMObject.a
-                ${MLIR_LIB_DIR}/libLLVMObjectYAML.a
-                ${MLIR_LIB_DIR}/libLLVMOption.a
-                ${MLIR_LIB_DIR}/libLLVMOrcJIT.a
-                ${MLIR_LIB_DIR}/libLLVMOrcShared.a
-                ${MLIR_LIB_DIR}/libLLVMOrcTargetProcess.a
-                ${MLIR_LIB_DIR}/libLLVMPasses.a
-                ${MLIR_LIB_DIR}/libLLVMProfileData.a
-                ${MLIR_LIB_DIR}/libLLVMRemarks.a
-                ${MLIR_LIB_DIR}/libLLVMRuntimeDyld.a
-                ${MLIR_LIB_DIR}/libLLVMScalarOpts.a
-                ${MLIR_LIB_DIR}/libLLVMSelectionDAG.a
-                ${MLIR_LIB_DIR}/libLLVMSupport.a
-                ${MLIR_LIB_DIR}/libLLVMSymbolize.a
-                ${MLIR_LIB_DIR}/libLLVMTableGen.a
-                ${MLIR_LIB_DIR}/libLLVMTableGenGlobalISel.a
-                ${MLIR_LIB_DIR}/libLLVMTarget.a
-                ${MLIR_LIB_DIR}/libLLVMTestingSupport.a
-                ${MLIR_LIB_DIR}/libLLVMTextAPI.a
-                ${MLIR_LIB_DIR}/libLLVMTransformUtils.a
-                ${MLIR_LIB_DIR}/libLLVMVectorize.a
-                ${MLIR_LIB_DIR}/libLLVMWindowsManifest.a
-                ${MLIR_LIB_DIR}/libLLVMX86AsmParser.a
-                ${MLIR_LIB_DIR}/libLLVMX86CodeGen.a
-                ${MLIR_LIB_DIR}/libLLVMX86Desc.a
-                ${MLIR_LIB_DIR}/libLLVMX86Disassembler.a
-                ${MLIR_LIB_DIR}/libLLVMX86Info.a
-                ${MLIR_LIB_DIR}/libLLVMXRay.a
-                ${MLIR_LIB_DIR}/libLLVMipo.a
-                ${MLIR_LIB_DIR}/libLTO.dylib
-                ${MLIR_LIB_DIR}/libMLIRAMX.a
-                ${MLIR_LIB_DIR}/libMLIRAMXToLLVMIRTranslation.a
-                ${MLIR_LIB_DIR}/libMLIRAMXTransforms.a
                 ${MLIR_LIB_DIR}/libMLIRAVX512.a
-                ${MLIR_LIB_DIR}/libMLIRAVX512ToLLVMIRTranslation.a
-                ${MLIR_LIB_DIR}/libMLIRAVX512Transforms.a
                 ${MLIR_LIB_DIR}/libMLIRAffine.a
                 ${MLIR_LIB_DIR}/libMLIRAffineEDSC.a
                 ${MLIR_LIB_DIR}/libMLIRAffineToStandard.a
@@ -176,7 +91,7 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRAffineUtils.a
                 ${MLIR_LIB_DIR}/libMLIRAnalysis.a
                 ${MLIR_LIB_DIR}/libMLIRArmNeon.a
-                ${MLIR_LIB_DIR}/libMLIRArmNeonToLLVMIRTranslation.a
+                ${MLIR_LIB_DIR}/libMLIRArmNeonToLLVM.a
                 ${MLIR_LIB_DIR}/libMLIRArmSVE.a
                 ${MLIR_LIB_DIR}/libMLIRArmSVEToLLVM.a
                 ${MLIR_LIB_DIR}/libMLIRAsync.a
@@ -189,11 +104,8 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRComplexToLLVM.a
                 ${MLIR_LIB_DIR}/libMLIRControlFlowInterfaces.a
                 ${MLIR_LIB_DIR}/libMLIRCopyOpInterface.a
-                ${MLIR_LIB_DIR}/libMLIRDLTI.a
-                ${MLIR_LIB_DIR}/libMLIRDataLayoutInterfaces.a
                 ${MLIR_LIB_DIR}/libMLIRDerivedAttributeOpInterface.a
                 ${MLIR_LIB_DIR}/libMLIRDialect.a
-                ${MLIR_LIB_DIR}/libMLIRDialectUtils.a
                 ${MLIR_LIB_DIR}/libMLIREDSC.a
                 ${MLIR_LIB_DIR}/libMLIRExecutionEngine.a
                 ${MLIR_LIB_DIR}/libMLIRGPU.a
@@ -205,11 +117,11 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRIR.a
                 ${MLIR_LIB_DIR}/libMLIRInferTypeOpInterface.a
                 ${MLIR_LIB_DIR}/libMLIRJitRunner.a
+                ${MLIR_LIB_DIR}/libMLIRLLVMAVX512.a
+                ${MLIR_LIB_DIR}/libMLIRLLVMArmNeon.a
                 ${MLIR_LIB_DIR}/libMLIRLLVMArmSVE.a
-                ${MLIR_LIB_DIR}/libMLIRLLVMArmSVEToLLVMIRTranslation.a
                 ${MLIR_LIB_DIR}/libMLIRLLVMIR.a
                 ${MLIR_LIB_DIR}/libMLIRLLVMIRTransforms.a
-                ${MLIR_LIB_DIR}/libMLIRLLVMToLLVMIRTranslation.a
                 ${MLIR_LIB_DIR}/libMLIRLinalg.a
                 ${MLIR_LIB_DIR}/libMLIRLinalgAnalysis.a
                 ${MLIR_LIB_DIR}/libMLIRLinalgEDSC.a
@@ -220,15 +132,10 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRLinalgUtils.a
                 ${MLIR_LIB_DIR}/libMLIRLoopAnalysis.a
                 ${MLIR_LIB_DIR}/libMLIRLoopLikeInterface.a
-                ${MLIR_LIB_DIR}/libMLIRMath.a
-                ${MLIR_LIB_DIR}/libMLIRMathTransforms.a
-                ${MLIR_LIB_DIR}/libMLIRMemRef.a
                 ${MLIR_LIB_DIR}/libMLIRNVVMIR.a
-                ${MLIR_LIB_DIR}/libMLIRNVVMToLLVMIRTranslation.a
                 ${MLIR_LIB_DIR}/libMLIROpenACC.a
                 ${MLIR_LIB_DIR}/libMLIROpenMP.a
                 ${MLIR_LIB_DIR}/libMLIROpenMPToLLVM.a
-                ${MLIR_LIB_DIR}/libMLIROpenMPToLLVMIRTranslation.a
                 ${MLIR_LIB_DIR}/libMLIROptLib.a
                 ${MLIR_LIB_DIR}/libMLIRPDL.a
                 ${MLIR_LIB_DIR}/libMLIRPDLInterp.a
@@ -239,7 +146,6 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRPublicAPI.dylib
                 ${MLIR_LIB_DIR}/libMLIRQuant.a
                 ${MLIR_LIB_DIR}/libMLIRROCDLIR.a
-                ${MLIR_LIB_DIR}/libMLIRROCDLToLLVMIRTranslation.a
                 ${MLIR_LIB_DIR}/libMLIRReduce.a
                 ${MLIR_LIB_DIR}/libMLIRRewrite.a
                 ${MLIR_LIB_DIR}/libMLIRSCF.a
@@ -272,23 +178,24 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRSupport.a
                 ${MLIR_LIB_DIR}/libMLIRSupportIndentedOstream.a
                 ${MLIR_LIB_DIR}/libMLIRTableGen.a
-                ${MLIR_LIB_DIR}/libMLIRTargetLLVMIRExport.a
-                ${MLIR_LIB_DIR}/libMLIRTargetLLVMIRImport.a
+                ${MLIR_LIB_DIR}/libMLIRTargetAVX512.a
+                ${MLIR_LIB_DIR}/libMLIRTargetArmNeon.a
+                ${MLIR_LIB_DIR}/libMLIRTargetArmSVE.a
+                ${MLIR_LIB_DIR}/libMLIRTargetLLVMIR.a
+                ${MLIR_LIB_DIR}/libMLIRTargetLLVMIRModuleTranslation.a
+                ${MLIR_LIB_DIR}/libMLIRTargetNVVMIR.a
+                ${MLIR_LIB_DIR}/libMLIRTargetROCDLIR.a
                 ${MLIR_LIB_DIR}/libMLIRTensor.a
                 ${MLIR_LIB_DIR}/libMLIRTensorTransforms.a
-                ${MLIR_LIB_DIR}/libMLIRTestAnalysis.a
                 ${MLIR_LIB_DIR}/libMLIRTestDialect.a
                 ${MLIR_LIB_DIR}/libMLIRTestIR.a
                 ${MLIR_LIB_DIR}/libMLIRTestPass.a
                 ${MLIR_LIB_DIR}/libMLIRTestReducer.a
                 ${MLIR_LIB_DIR}/libMLIRTestRewrite.a
                 ${MLIR_LIB_DIR}/libMLIRTestTransforms.a
-                ${MLIR_LIB_DIR}/libMLIRToLLVMIRTranslationRegistration.a
                 ${MLIR_LIB_DIR}/libMLIRTosa.a
                 ${MLIR_LIB_DIR}/libMLIRTosaTestPasses.a
                 ${MLIR_LIB_DIR}/libMLIRTosaToLinalg.a
-                ${MLIR_LIB_DIR}/libMLIRTosaToSCF.a
-                ${MLIR_LIB_DIR}/libMLIRTosaToStandard.a
                 ${MLIR_LIB_DIR}/libMLIRTosaTransforms.a
                 ${MLIR_LIB_DIR}/libMLIRTransformUtils.a
                 ${MLIR_LIB_DIR}/libMLIRTransforms.a
@@ -300,11 +207,13 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRVectorToSCF.a
                 ${MLIR_LIB_DIR}/libMLIRVectorToSPIRV.a
                 ${MLIR_LIB_DIR}/libMLIRViewLikeInterface.a
-                ${MLIR_LIB_DIR}/libgtest.a
-                ${MLIR_LIB_DIR}/libgtest_main.a
-                ${MLIR_LIB_DIR}/libmlir_async_runtime.dylib
-                ${MLIR_LIB_DIR}/libmlir_c_runner_utils.dylib
-                ${MLIR_LIB_DIR}/libmlir_runner_utils.dylib
+                ${MLIR_LIB_DIR}/libLLVMJITLink.a
+                ${MLIR_LIB_DIR}/libLLVMExecutionEngine.a
+                ${MLIR_LIB_DIR}/libLLVMJITLink.a
+                ${MLIR_LIB_DIR}/libLLVMOrcJIT.a
+                ${MLIR_LIB_DIR}/libLLVMOrcShared.a
+                ${MLIR_LIB_DIR}/libLLVMOrcTargetProcess.a
+                ${MLIR_LIB_DIR}/libLLVMRuntimeDyld.a
                 )
     endif ()
 

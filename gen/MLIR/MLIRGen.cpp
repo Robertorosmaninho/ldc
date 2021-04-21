@@ -148,7 +148,7 @@ private:
   unsigned total = 0, miss = 0;
 
   mlir::Location loc(Loc loc) {
-    return mlir::FileLineColLoc::get(
+    return builder.getFileLineColLoc(
         builder.getIdentifier(StringRef(loc.filename)), loc.linnum,
         loc.charnum);
   }

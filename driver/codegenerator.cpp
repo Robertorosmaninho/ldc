@@ -33,8 +33,7 @@
 #include "mlir/Parser.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
-#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
-#include "mlir/Target/LLVMIR/Export.h"
+#include "mlir/Target/LLVMIR.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"
@@ -44,6 +43,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
+#include "mlir/Target/LLVMIR.h"
 #endif
 #include "gen/dynamiccompile.h"
 #include "gen/logger.h"
@@ -379,13 +379,9 @@ void CodeGenerator::emitMLIR(Module *m) {
 }
 
 int runJit(mlir::ModuleOp module) {
-  // Initialize LLVM targets.
+// Initialize LLVM targets.
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
-
-  // Register the translation from MLIR to LLVM IR, which must happen before we
-  // can JIT-compile.
-  mlir::registerLLVMDialectTranslation(*module->getContext());
 
   // An optimization pipeline to use within the execution engine.
   auto optPipeline = mlir::makeOptimizingTransformer(
@@ -410,12 +406,9 @@ int runJit(mlir::ModuleOp module) {
 }
 
 void emitLLVMIR(mlir::ModuleOp module, const char *filename) {
-  // Register the translation to LLVM IR with the MLIR context.
-  mlir::registerLLVMDialectTranslation(*module->getContext());
-
   // Convert the module to LLVM IR in a new LLVM IR context.
   llvm::LLVMContext llvmContext;
-  auto llvmModule = mlir::translateModuleToLLVMIR(module, llvmContext);
+  auto llvmModule =  mlir::translateModuleToLLVMIR(module, llvmContext);
   if (!llvmModule) {
     llvm::errs() << "Failed to emit LLVM IR\n";
     fatal();

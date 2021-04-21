@@ -15,7 +15,6 @@
 #define D_OPS
 
 include "mlir/Interfaces/CallInterfaces.td"
-include "mlir/Interfaces/CastInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 // Provide a definition of the 'D' dialect in the ODS framework so that we
 
@@ -53,7 +52,7 @@ def AddOp : D_Op<"add", [NoSideEffect, Commutative]> {
     let results = (outs AnyType);
 
     let builders = [
-        OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+        OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -70,7 +69,7 @@ def AddFOp : D_Op<"add", [NoSideEffect, Commutative]> {
     let results = (outs AnyType);
 
     let builders = [
-        OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+        OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
     ];
 }
 
@@ -90,7 +89,7 @@ def SubOp : D_Op<"sub", [NoSideEffect]> {
 
     // Allow building an SubOp with from the two input operands.
     let builders = [
-      OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+      OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
     ];
 }
 
@@ -109,7 +108,7 @@ def SubFOp : D_Op<"fsub"> {
 
     // Allow building an SubFOp with from the two input operands.
     let builders = [
-      OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+      OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
     ];
 }
 
@@ -125,7 +124,7 @@ def MulOp : D_Op<"mul"> {
 
   // Allow building a MulOp with from the two input operands.
   let builders = [
-    OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+    OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
   ];
 }
 
@@ -141,7 +140,7 @@ def MulFOp : D_Op<"fmul"> {
 
   // Allow building a MulOp with from the two input operands.
   let builders = [
-    OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+    OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
   ];
 }
 
@@ -159,7 +158,7 @@ def DivSOp : D_Op<"sdiv"> {
 
    // Allow building a DivSOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -177,7 +176,7 @@ def DivUOp : D_Op<"udiv"> {
 
    // Allow building a DivUOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -195,7 +194,7 @@ def DivFOp : D_Op<"fdiv"> {
 
    // Allow building a DivIOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -213,7 +212,7 @@ def ModSOp : D_Op<"srem"> {
 
    // Allow building a ModSOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -231,7 +230,7 @@ def ModUOp : D_Op<"urem"> {
 
    // Allow building a ModUOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -249,7 +248,7 @@ def ModFOp : D_Op<"frem"> {
 
    // Allow building a ModFOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -266,7 +265,7 @@ def AndOp : D_Op<"and"> {
 
    // Allow building a AndOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -283,7 +282,7 @@ def OrOp : D_Op<"or"> {
 
    // Allow building a OrOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -301,7 +300,7 @@ def XorOp : D_Op<"xor"> {
 
    // Allow building a XorOp with from the two input operands.
      let builders = [
-       OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
+       OpBuilderDAG<(ins "Value":$lhs, "Value":$rhs)>
      ];
 }
 
@@ -336,7 +335,7 @@ def XorOp : D_Op<"xor"> {
 
     // Add custom build methods for the call operation.
     let builders = [
-        OpBuilder<(ins "StringRef":$callee,
+        OpBuilderDAG<(ins "StringRef":$callee,
                           "ArrayRef<Type> types":$types,
                           "ArrayRef<Value>":$arguments)>
     ];
@@ -365,9 +364,9 @@ def XorOp : D_Op<"xor"> {
 
   let builders = [
     // Build a constant with a given constant integer value.
-    OpBuilder<(ins "Type":$type, "int":$value, "int":$size)>,
+    OpBuilderDAG<(ins "Type":$type, "int":$value, "int":$size)>,
 
-   // OpBuilder<
+   // OpBuilderDAG<
    //     "Builder *builder, OperationState &result, Attribute value",
    //     [{ build(builder, result, value.getType(), value); }]>
   ];
@@ -399,10 +398,10 @@ def FloatOp : D_Op<"float", [NoSideEffect]> {
   // used when using `builder.create<FloatOp>(...)`.
   let builders = [
     // Build a constant with a given constant float value.
-    OpBuilder<(ins "Type":$type, "float":$value)>
+    OpBuilderDAG<(ins "Type":$type, "float":$value)>
 
     // Build a float with a given value.
-    // OpBuilder<
+    // OpBuilderDAG<
     //      "Builder *builder, OperationState &result, Attribute value",
     //      [{ build(builder, result, value.getType(), value); }]>
   ];
@@ -432,10 +431,10 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
   // used when using `builder.create<DoubleOp>(...)`.
   let builders = [
     // Build a constant with a given constant double value.
-    OpBuilder<(ins "Type":$type, "double":$value)>
+    OpBuilderDAG<(ins "Type":$type, "double":$value)>
 
     // Build a double with a given value.
-    //OpBuilder<
+    //OpBuilderDAG<
     //        "Builder *builder, OperationState &result, Attribute value",
     //        [{ build(builder, result, value.getType(), value); }]>
   ];
@@ -459,11 +458,11 @@ def CastOp : D_Op<"cast"> {
   let arguments = (ins AnyTypeOf<[AnyType, AnyMemRef]>:$input);
   let results = (outs AnyType:$output);
 
-    let builders = [OpBuilder<(ins "Value":$value, "Type":$destType), [{
+    let builders = [OpBuilderDAG<(ins "Value":$value, "Type":$destType), [{
      build($_builder, $_state, destType, value);
      }]>];
 
-//  let builders = [OpBuilder<
+//  let builders = [OpBuilderDAG<
 //    "Builder *builder, OperationState &result, Value value, Type destType", [{
 //      result.addOperands(value);
 //      result.addTypes(destType);
