@@ -443,7 +443,7 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Cast Operations
+// Cast Operation
 ////////////////////////////////////////////////////////////////////////////////
 
 def CastOp : D_Op<"cast"> {
@@ -469,5 +469,44 @@ def CastOp : D_Op<"cast"> {
 //  }]>];
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Return Operation
+////////////////////////////////////////////////////////////////////////////////
 
+def ReturnOp : D_Op<"return", [NoSideEffect,  Terminator]> {
+  let summary = "return operation";
+  let description = [{
+    The "return" operation represents a return operation within a function.
+    The operation takes an optional operand and produces no results.
+    The operand type must match the signature of the function that contains
+    the operation. For example:
+
+    ```mlir
+      func @foo() -> tensor<2xf64> {
+        ...
+        toy.return %0 : tensor<2xf64>
+      }
+    ```
+  }];
+
+    // The return operation takes an optional input operand to return. This
+    // value must match the return type of the enclosing function.
+    let arguments = (ins Variadic<AnyType>:$input);
+
+    // The return operation only emits the input in the format if it is present.
+    let assemblyFormat = "($input^ `:` type($input))? attr-dict ";
+
+    // Allow building a ReturnOp with no return operand.
+    let builders = [
+      OpBuilderDAG<(ins), [{ build($_builder, $_state, llvm::None); }]>
+    ];
+
+    // Provide extra utility definitions on the c++ operation class definition.
+    let extraClassDeclaration = [{
+      bool hasOperand() { return getNumOperands() != 0; }
+    }];
+
+    // Invoke a static verify method to verify this return operation.
+    let verifier = [{ return ::verify(*this); }];
+}
 #endif // D_OPS

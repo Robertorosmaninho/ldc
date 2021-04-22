@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 #if LDC_MLIR_ENABLED
 
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "gen/MLIR/Dialect.h"
 #include "gen/logger.h"
@@ -419,6 +420,44 @@ void D::DoubleOp::build(OpBuilder &builder, OperationState &state, Type type,
   } else {
     IF_LOG Logger::println("Unable to get the Attribute for %f", value);
   }
+}
+
+static auto verify(D::ReturnOp op) -> mlir::LogicalResult {
+  // We know that the parent operation is a function, because of the 'HasParent'
+  // trait attached to the operation definition.
+  auto function = static_cast<mlir::FuncOp>(op->getParentOp());
+
+  /// ReturnOps can only have a single optional operand.
+  if (op.getNumOperands() > 1) {
+    return op.emitOpError() << "expects at most 1 return operand";
+  }
+
+  // The operand number and types must match the function signature.
+  const auto &results = function.getType().getResults();
+  if (op.getNumOperands() != results.size()) {
+    return op.emitOpError()
+        << "does not return the same number of values ("
+        << op.getNumOperands() << ") as the enclosing function ("
+        << results.size() << ")";
+  }
+
+  // If the operation does not have an input, we are done.
+  if (!op.hasOperand()) {
+    return mlir::success();
+  }
+
+  auto inputType = *op.operand_type_begin();
+  auto resultType = results.front();
+
+  // Check that the result type of the function matches the operand type.
+  if (inputType == resultType || inputType.isa<mlir::UnrankedTensorType>() ||
+      resultType.isa<mlir::UnrankedTensorType>()) {
+    return mlir::success();
+  }
+
+  return op.emitError() << "type of return operand (" << inputType
+                        << ") doesn't match function result type ("
+                        << resultType << ")";
 }
 
 /// Parse an instance of a type registered to the toy dialect.

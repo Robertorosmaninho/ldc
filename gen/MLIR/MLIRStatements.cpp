@@ -207,12 +207,9 @@ mlir::LogicalResult MLIRStatements::mlirGen(ReturnStatement *returnStatement) {
         declaration.mlirGen(returnStatement->exp, builder.getInsertionBlock());
     if (!expr)
       return mlir::failure();
-    builder.create<mlir::ReturnOp>(location, mlir::ValueRange(expr));
-
-    // Assuming that the function only returns one value
-    //returnOp.setOperand(0, expr);
+    builder.create<mlir::D::ReturnOp>(location, expr);
   } else {
-    builder.create<mlir::ReturnOp>(location);
+    builder.create<mlir::D::ReturnOp>(location);
   }
 
   return mlir::success();
