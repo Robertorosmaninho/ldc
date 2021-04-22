@@ -852,7 +852,7 @@ set_tests_properties(ldc2-unittest PROPERTIES DEPENDS build-ldc2-unittest)
 
 add_dependencies(${LDC_EXE} Ops_H)
 add_dependencies(${LDC_EXE} Ops_CPP)
-add_dependencies(${LDC_EXE} Ops_Dialect)
+#add_dependencies(${LDC_EXE} Ops_Dialect)
 
 if(EXISTS "${PROJECT_SOURCE_DIR}/runtime/druntime/src/object.d")
     add_subdirectory(runtime)

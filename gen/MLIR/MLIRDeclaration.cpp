@@ -318,7 +318,7 @@ mlir::Value MLIRDeclaration::DtoAssignMLIR(mlir::Location Loc, mlir::Value lhs,
 mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp,
                                      AddAssignExp *addAssignExp) {
   mlir::Value e1, e2, result;
- /* mlir::Location *location = nullptr;
+  mlir::Location *location = nullptr;
 
   if (addAssignExp) {
     IF_LOG Logger::println(
@@ -353,14 +353,14 @@ mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp,
     _miss++;
     return nullptr;
   }
-*/
+
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp,
                                      AndAssignExp *andAssignExp) {
   mlir::Value e1, e2, result;
-  /*mlir::Location *location = nullptr;
+  mlir::Location *location = nullptr;
 
   if (andAssignExp) {
     IF_LOG Logger::println(
@@ -393,13 +393,13 @@ mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp,
   } else {
     _miss++;
     return nullptr;
-  }*/
+  }
 
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp) {
- /* IF_LOG Logger::println("MLIRCodeGen - ArrayLiteralExp: '%s'",
+  IF_LOG Logger::println("MLIRCodeGen - ArrayLiteralExp: '%s'",
                          arrayLiteralExp->toChars());
   LOG_SCOPE
   _total++;
@@ -478,8 +478,7 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp) {
     _miss++;
     Logger::println("Unable to build ArrayLiteralExp: '%s'",
                     arrayLiteralExp->toChars());
-  }*/
-  return nullptr;
+  }
 }
 
 mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp) {
@@ -744,7 +743,7 @@ mlir::Value MLIRDeclaration::mlirGen(DeclarationExp *decl_exp) {
 mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp,
                                      DivAssignExp *divAssignExp) {
   mlir::Value e1, e2, result;
- /* mlir::Location *location = nullptr;
+  mlir::Location *location = nullptr;
   bool isSigned = true;
 
   if (divAssignExp) {
@@ -790,7 +789,7 @@ mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp,
     _miss++;
     return nullptr;
   }
-*/
+
   return result;
 }
 
@@ -933,8 +932,7 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, int func) {
 }
 
 mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp) {
-  return nullptr;
- /* _total++;
+  _total++;
   dinteger_t dint = integerExp->value;
   Logger::println("MLIRGen - Integer: '%lu'", dint);
   mlir::Location location = builder.getUnknownLoc();
@@ -969,13 +967,13 @@ mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp) {
     fatal();
   }
   return builder.create<mlir::D::IntegerOp>(location, shapedType,
-                                            dataAttribute);*/
+                                            dataAttribute);
 }
 
 mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp,
                                      MinAssignExp *minAssignExp) {
   mlir::Value e1, e2, result;
- /* mlir::Location *location = nullptr;
+  mlir::Location *location = nullptr;
 
   if (minAssignExp) {
     IF_LOG Logger::println(
@@ -1012,14 +1010,14 @@ mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp,
     _miss++;
     return nullptr;
   }
-*/
+
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(ModExp *modExp,
                                      ModAssignExp *modAssignExp) {
   mlir::Value e1, e2, result;
- /* mlir::Location *location = nullptr;
+  mlir::Location *location = nullptr;
   bool isSigned = true;
 
   if (modAssignExp) {
@@ -1065,14 +1063,14 @@ mlir::Value MLIRDeclaration::mlirGen(ModExp *modExp,
     _miss++;
     return nullptr;
   }
-*/
+
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp,
                                      MulAssignExp *mulAssignExp) {
   mlir::Value e1, e2, result;
-  /*mlir::Location *location = nullptr;
+  mlir::Location *location = nullptr;
 
   if (mulAssignExp) {
     IF_LOG Logger::println(
@@ -1111,13 +1109,13 @@ mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp,
     _miss++;
     return nullptr;
   }
-*/
+
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp) {
   mlir::Value e1, e2, result;
- /* mlir::Location *location = nullptr;
+  mlir::Location *location = nullptr;
 
   if (orAssignExp) {
     IF_LOG Logger::println(
@@ -1151,12 +1149,12 @@ mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp) {
     _miss++;
     return nullptr;
   }
-*/
+
   return result;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp) {
- /* IF_LOG Logger::print("MLIRGen - PostExp: %s @ %s\n", postExp->toChars(),
+  IF_LOG Logger::print("MLIRGen - PostExp: %s @ %s\n", postExp->toChars(),
                        postExp->type->toChars());
   LOG_SCOPE;
 
@@ -1193,12 +1191,12 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp) {
     else
       return builder.create<mlir::D::SubOp>(location, e1, e2);
   }
-  _miss++;*/
+  _miss++;
   return nullptr;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(RealExp *realExp) {
- /* _total++;
+  _total++;
   real_t dfloat = realExp->value;
   IF_LOG Logger::println("MLIRCodeGen - RealExp: '%Lf'", dfloat);
   mlir::Location Loc = loc(realExp->loc);
@@ -1206,8 +1204,7 @@ mlir::Value MLIRDeclaration::mlirGen(RealExp *realExp) {
   if (type.isF64())
     return builder.create<mlir::D::DoubleOp>(Loc, type, dfloat);
   else
-    return builder.create<mlir::D::FloatOp>(Loc, type, dfloat);*/
- return nullptr;
+    return builder.create<mlir::D::FloatOp>(Loc, type, dfloat);
 }
 
 mlir::Value MLIRDeclaration::mlirGen(StringExp *stringExp) {
@@ -1250,7 +1247,7 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp) {
   if (var)
     return var;
 
- /* if (auto fd = varExp->var->isFuncLiteralDeclaration()) {
+  /*if (auto fd = varExp->var->isFuncLiteralDeclaration()) {
     Logger::println("Build genFuncLiteral");
     fd = fd->toAliasFunc();
     MLIRFunction func = MLIRFunction()
@@ -1265,8 +1262,7 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp) {
     // See DMD issues 16022 and 16100.
     // TODO: return toElem(em->value(), p) -> Expression, bool
   }
-
-  /*mlir::Type type = get_MLIRtype(varExp, varExp->type);
+  mlir::Type type = get_MLIRtype(varExp, varExp->type);
   if (type.isIntOrFloat()) {
     IF_LOG Logger::println("Undeclared VarExp: '%s' | '%u'", varExp->toChars(),
                            varExp->op);
@@ -1274,7 +1270,7 @@ mlir::Value MLIRDeclaration::mlirGen(VarExp *varExp) {
         mlir::RankedTensorType::get(1, builder.getIntegerType(32));
     auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, 0);
     return builder.create<mlir::D::IntegerOp>(loc(varExp->loc), shapedType, dataAttribute);
-  } else if (varExp->type->ty == Tstruct) {
+  } /*else if (varExp->type->ty == Tstruct) {
     if (StructLiteralExp *sle = varExp->isStructLiteralExp()) {
       return mlirGen(sle);
     }
@@ -1370,7 +1366,7 @@ mlir::Value MLIRDeclaration::DtoMLIRSymbolAddress(mlir::Location loc,
 mlir::Value MLIRDeclaration::mlirGen(XorExp *xorExp,
                                      XorAssignExp *xorAssignExp) {
   mlir::Value e1, e2, result;
-/*  mlir::Location *location = nullptr;
+  mlir::Location *location = nullptr;
 
   if (xorAssignExp) {
     IF_LOG Logger::println(
@@ -1404,7 +1400,7 @@ mlir::Value MLIRDeclaration::mlirGen(XorExp *xorExp,
     _miss++;
     return nullptr;
   }
-*/
+
   return result;
 }
 
@@ -1495,7 +1491,7 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression,
   } else if (LogicalExp *logicalExp = expression->isLogicalExp()) {
     _miss++;
     return nullptr; // add mlirGen(logicalExp); //needs to implement with blocks
-  } /*else if (expression->isAddExp() || expression->isAddAssignExp())
+  } else if (expression->isAddExp() || expression->isAddAssignExp())
     return mlirGen(expression->isAddExp(), expression->isAddAssignExp());
   else if (expression->isMinExp() || expression->isMinAssignExp())
     return mlirGen(expression->isMinExp(), expression->isMinAssignExp());
@@ -1519,7 +1515,7 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression,
  //   return mlirGen(expression->isStructLiteralExp());
   } else if (DotVarExp *dotVarExp = expression->isDotVarExp()) {
     return mlirGen(dotVarExp);
-  }*/
+  }
 
   _miss++;
   IF_LOG Logger::println("Unable to recoganize the Expression: '%s' : '%u': "

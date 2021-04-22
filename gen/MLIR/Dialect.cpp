@@ -11,44 +11,57 @@
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "gen/MLIR/Dialect.h"
 #include "gen/logger.h"
-
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Dialect.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/Transforms/InliningUtils.h"
-#include "mlir/IR/BuiltinTypes.h"
-#include "mlir/IR/OpImplementation.h"
-#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/MLIRContext.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
 using namespace mlir::D;
 
+/// Dialect creation, the instance will be owned by the context. This is the
+/// point of registration of custom types and operations for the dialect.
+DDialect::DDialect(mlir::MLIRContext *ctx)
+    : mlir::Dialect(getDialectNamespace(), ctx, TypeID::get<DDialect>()) {
+  addOperations<
+#define GET_OP_LIST
+#include "Ops.cpp.inc"
+  >();
+  //addTypes<StructType>();
+}
 
-
-/*Operation *DDialect::materializeConstant(OpBuilder &builder, Attribute value,
-                                         Type type, Location loc) {
+auto DDialect::materializeConstant(OpBuilder &builder, Attribute value,
+                                         Type type, Location loc) -> Operation * {
   Type originalType = type;
   Operation *op = nullptr;
 
-  if (type.isa<TensorType>())
+  if (type.isa<TensorType>()) {
     type = type.cast<RankedTensorType>().getElementType();
+}
 
-  if (type.isa<StructType>())
-    op = builder.create<StructConstantOp>(loc, originalType,
-                                          value.cast<ArrayAttr>());
-  else if (type.isF16() || type.isF32())
+  //if (type.isa<StructType>())
+  //  op = builder.create<StructConstantOp>(loc, originalType,
+  //                                        value.cast<ArrayAttr>());
+  //else
+  if (type.isF16() || type.isF32()) {
     op = builder.create<D::FloatOp>(loc, originalType,
                                     value.cast<DenseElementsAttr>());
-  else if (type.isF64())
+  } else if (type.isF64()) {
     op = builder.create<D::DoubleOp>(loc, originalType,
                                      value.cast<DenseElementsAttr>());
-  else if (type.isInteger(1) || type.isInteger(8) || type.isInteger(16) ||
-           type.isInteger(32) || type.isInteger(64) || type.isInteger(128))
+  } else if (type.isInteger(1) || type.isInteger(8) || type.isInteger(16) ||
+           type.isInteger(32) || type.isInteger(64) || type.isInteger(128)) {
     op = builder.create<D::IntegerOp>(loc, originalType,
                                       value.cast<DenseElementsAttr>());
+}
 
   return op;
-}*/
+}
+
 
 //===----------------------------------------------------------------------===//
 // D Operations
@@ -116,7 +129,7 @@ static LogicalResult verify(StructConstantOp op) {
 //===----------------------------------------------------------------------===//
 // StructAccessOp
 
-void StructAccessOp::build(Builder *b, OperationState &state, Value input,
+void StructAccessOp::build(OpBuilder *b, OperationState &state, Value input,
                            size_t index) {
   // Extract the result type from the input type.
   StructType structTy = input.getType().cast<StructType>();
@@ -124,7 +137,7 @@ void StructAccessOp::build(Builder *b, OperationState &state, Value input,
   Type resultType = structTy.getElementTypes()[index];
 
   // Call into the auto-generated build method.
-  build(b, state, resultType, input, b->getI64IntegerAttr(index));
+  build(b, state, resultType, input, b.getI64IntegerAttr(index));
 }
 
 static LogicalResult verify(StructAccessOp op) {
@@ -220,9 +233,196 @@ llvm::ArrayRef<Type> StructType::getElementTypes() {
   // 'getImpl' returns a pointer to the internal storage instance.
   return getImpl()->elementTypes;
 }
+*/
+
+//===----------------------------------------------------------------------===//
+// Dialect Ops
+
+void AddOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::AddFOp::build(OpBuilder &b, OperationState &state, Value lhs,
+                             Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void SubOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::SubFOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void MulOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::MulFOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::DivFOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::DivSOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::DivUOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::ModSOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::ModUOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::ModFOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::AndOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::OrOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+void D::XorOp::build(OpBuilder &b, OperationState &state, Value lhs, Value rhs) {
+  if (lhs.getType() == rhs.getType()) {
+    state.addTypes(lhs.getType());
+  } else {
+    state.addTypes(NoneType::get(b.getContext()));
+  }
+  state.addOperands({lhs, rhs});
+}
+
+/*void D::CallOp::build(OpBuilder &b, OperationState &state, llvm::StringRef
+                                                                 callee,
+                      llvm::ArrayRef<Type> types,
+                      llvm::ArrayRef<Value> arguments) {
+  state.addTypes(types);
+  state.addOperands(arguments);
+  state.addAttribute("callee", b.getSymbolRefAttr(callee));
+}*/
+
+void D::IntegerOp::build(OpBuilder &builder, OperationState &state, Type type,
+                         int value, int size = 0) {
+  if (type.isInteger(size)) {
+    auto dataType = builder.getIntegerType(size);
+    auto shapedType = RankedTensorType::get({}, dataType);
+    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
+    IntegerOp::build(builder, state, shapedType, dataAttribute);
+  } else {
+    IF_LOG Logger::println("Unable to get the Attribute for %d", value);
+  }
+}
+
+void D::FloatOp::build(OpBuilder &builder, OperationState &state, Type type,
+                       float value) {
+  if (type.isF16()) {
+    auto shapedType = RankedTensorType::get({}, builder.getF16Type());
+    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
+    FloatOp::build(builder, state, shapedType, dataAttribute);
+  } else if (type.isF32()) {
+    auto shapedType = RankedTensorType::get(1, builder.getF32Type());
+    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
+    FloatOp::build(builder, state, shapedType, dataAttribute);
+  } else {
+    IF_LOG Logger::println("Unable to get the Attribute for %f", value);
+  }
+}
+
+void D::DoubleOp::build(OpBuilder &builder, OperationState &state, Type type,
+                        double value) {
+  if (type.isF64()) {
+    auto shapedType = RankedTensorType::get(1, builder.getF64Type());
+    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
+    FloatOp::build(builder, state, shapedType, dataAttribute);
+  } else {
+    IF_LOG Logger::println("Unable to get the Attribute for %f", value);
+  }
+}
 
 /// Parse an instance of a type registered to the toy dialect.
-Type DDialect::parseType(DialectAsmParser &parser) const {
+auto DDialect::parseType(DialectAsmParser &parser) const -> Type {
   // Parse a struct type in the following form:
   //   struct-type ::= `struct` `<` type (`,` type)* `>`
 
@@ -232,200 +432,50 @@ Type DDialect::parseType(DialectAsmParser &parser) const {
   // `mlir::failed/mlir::succeeded` as desired.
 
   // Parse: `struct` `<`
-  if (parser.parseKeyword("struct") || parser.parseLess())
+  if (parser.parseKeyword("struct") || parser.parseLess()) {
     return Type();
+  }
 
   // Parse the element types of the struct.
   SmallVector<Type, 1> elementTypes;
   do {
     // Parse the current element type.
-    llvm::SMLoc typeLoc = parser.getCurrentLocation();
+    //llvm::SMLoc typeLoc = parser.getCurrentLocation();
     Type elementType;
-    if (parser.parseType(elementType))
+    if (parser.parseType(elementType)) {
       return nullptr;
+    }
 
     // Check that the type is either a TensorType or another StructType.
-    if (!elementType.isa<TensorType>() && !elementType.isa<StructType>()) {
+/*    if (!elementType.isa<TensorType>() && !elementType.isa<StructType>()) {
       parser.emitError(typeLoc, "element type for a struct must either "
                                 "be a TensorType or a StructType, got: ")
           << elementType;
       return Type();
     }
     elementTypes.push_back(elementType);
-
+*/
     // Parse the optional: `,`
   } while (succeeded(parser.parseOptionalComma()));
 
   // Parse: `>`
-  if (parser.parseGreater())
+  if (parser.parseGreater()) {
     return Type();
-  return StructType::get(elementTypes);
+  }
+  //return StructType::get(elementTypes);
+  return nullptr;
 }
 
 /// Print an instance of a type registered to the toy dialect.
 void DDialect::printType(Type type, DialectAsmPrinter &printer) const {
   // Currently the only toy type is a struct type.
-  StructType structType = type.cast<StructType>();
+  //StructType structType = type.cast<StructType>();
 
   // Print the struct type according to the parser format.
   printer << "struct<";
-  interleaveComma(structType.getElementTypes(), printer);
+  //interleaveComma(structType.getElementTypes(), printer);
   printer << '>';
 }
-*/
-//===----------------------------------------------------------------------===//
-// Dialect Ops
-
-/*void D::SubOp::build(Builder *b, OperationState &state, Value lhs, Value
- * rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::SubFOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void MulOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::MulFOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::DivFOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::DivSOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::DivUOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::ModSOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::ModUOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::ModFOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::AndOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::OrOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::XorOp::build(Builder *b, OperationState &state, Value lhs, Value rhs) {
-  if (lhs.getType() == rhs.getType())
-    state.addTypes(lhs.getType());
-  else
-    state.addTypes(NoneType::get(b->getContext()));
-  state.addOperands({lhs, rhs});
-}
-
-void D::CallOp::build(Builder *b, OperationState &state, llvm::StringRef callee,
-                      llvm::ArrayRef<Type> types,
-                      llvm::ArrayRef<Value> arguments) {
-  state.addTypes(types);
-  state.addOperands(arguments);
-  state.addAttribute("callee", b->getSymbolRefAttr(callee));
-}
-
-void D::IntegerOp::build(Builder *builder, OperationState &state, Type type,
-                         int value, int size = 0) {
-  if (type.isInteger(size)) {
-    auto dataType = builder->getIntegerType(size);
-    auto shapedType = RankedTensorType::get({}, dataType);
-    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
-    IntegerOp::build(builder, state, dataAttribute);
-  } else {
-    IF_LOG Logger::println("Unable to get the Attribute for %d", value);
-  }
-}
-
-void D::FloatOp::build(Builder *builder, OperationState &state, Type type,
-                       float value) {
-  if (type.isF16()) {
-    auto shapedType = RankedTensorType::get({}, builder->getF16Type());
-    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
-    FloatOp::build(builder, state, dataAttribute);
-  } else if (type.isF32()) {
-    auto shapedType = RankedTensorType::get(1, builder->getF32Type());
-    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
-    FloatOp::build(builder, state, dataAttribute);
-  } else {
-    IF_LOG Logger::println("Unable to get the Attribute for %f", value);
-  }
-}
-
-void D::DoubleOp::build(Builder *builder, OperationState &state, Type type,
-                        double value) {
-  if (type.isF64()) {
-    auto shapedType = RankedTensorType::get(1, builder->getF64Type());
-    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
-    FloatOp::build(builder, state, dataAttribute);
-  } else {
-    IF_LOG Logger::println("Unable to get the Attribute for %f", value);
-  }
-}*/
 
 //===----------------------------------------------------------------------===//
 // TableGen'd op method definitions
@@ -433,19 +483,5 @@ void D::DoubleOp::build(Builder *builder, OperationState &state, Type type,
 
 #define GET_OP_CLASSES
 #include "Ops.cpp.inc"
-
-//===----------------------------------------------------------------------===//
-// DDialect
-//===----------------------------------------------------------------------===//
-
-/// Dialect creation, the instance will be owned by the context. This is the
-/// point of registration of custom types and operations for the dialect.
-void DDialect::initialize() {
-  addOperations<
-#define GET_OP_LIST
-#include "Ops.cpp.inc"
-  >();
-  //addTypes<StructType>();
-}
 
 #endif // LDC_MLIR_ENABLED

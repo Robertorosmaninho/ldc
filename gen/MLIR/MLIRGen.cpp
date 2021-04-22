@@ -218,7 +218,6 @@ private:
 
     MLIRFunction FuncDecl(Fd, context, builder, symbolTable, structMap, total,
                           miss);
-    mlir::Type type = FuncDecl.DtoMLIRFunctionType(Fd);
 
     // Create an MLIR function for the given prototype.
     mlir::FuncOp function(mlirGen(Fd, true));
@@ -267,7 +266,6 @@ private:
     if (LastOp != "std.return" && LastOp != "std.br" &&
         LastOp != "std.cond_br") {
 
-      function.getBody().back().back().dump();
       ReturnStatement *returnStatement = Fd->returns->front();
       if (returnStatement != nullptr)
         genStmt.mlirGen(returnStatement);
@@ -275,7 +273,12 @@ private:
         builder.create<mlir::ReturnOp>(
             function.getBody().back().back().getLoc());
       }
+    } else {
+      auto returnType = function.getBody().back().back().operand_type_begin();
+      function.setType(builder.getFunctionType(function.getType().getInputs(),
+                                               *returnType));
     }
+
     return function;
   }
 

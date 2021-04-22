@@ -20,7 +20,7 @@ using namespace mlir;
 using namespace D;
 
 /// Fold integers.
-/*OpFoldResult IntegerOp::fold(ArrayRef<Attribute> operands) { return value(); }
+OpFoldResult IntegerOp::fold(ArrayRef<Attribute> operands) { return value(); }
 
 /// Fold floats.
 OpFoldResult FloatOp::fold(ArrayRef<Attribute> operands) { return value(); }
@@ -29,7 +29,7 @@ OpFoldResult FloatOp::fold(ArrayRef<Attribute> operands) { return value(); }
 OpFoldResult DoubleOp::fold(ArrayRef<Attribute> operands) { return value(); }
 
 /// Fold struct constants.
-OpFoldResult StructConstantOp::fold(ArrayRef<Attribute> operands) {
+/*OpFoldResult StructConstantOp::fold(ArrayRef<Attribute> operands) {
   return value();
 }
 

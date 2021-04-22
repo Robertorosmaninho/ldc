@@ -76,7 +76,7 @@
 #if LDC_MLIR_ENABLED
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/MLIRContext.h"
-
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "gen/MLIR/Dialect.h"
 #include "gen/MLIR/MLIRGen.h"
 #endif
@@ -1170,7 +1170,8 @@ void codegenModules(Modules &modules) {
 #if LDC_MLIR_ENABLED
     // Registering DDialect and getting mlircontext with it
     mlir::MLIRContext mlircontext;
-    mlircontext.loadDialect<mlir::D::DDialect>();
+    mlircontext.getOrLoadDialect<mlir::D::DDialect>();
+    mlircontext.getOrLoadDialect<mlir::StandardOpsDialect>();
     ldc::CodeGenerator cg(getGlobalContext(), mlircontext,
                           global.params.oneobj);
 #else

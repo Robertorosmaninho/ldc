@@ -209,7 +209,6 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRViewLikeInterface.a
                 ${MLIR_LIB_DIR}/libLLVMJITLink.a
                 ${MLIR_LIB_DIR}/libLLVMExecutionEngine.a
-                ${MLIR_LIB_DIR}/libLLVMJITLink.a
                 ${MLIR_LIB_DIR}/libLLVMOrcJIT.a
                 ${MLIR_LIB_DIR}/libLLVMOrcShared.a
                 ${MLIR_LIB_DIR}/libLLVMOrcTargetProcess.a

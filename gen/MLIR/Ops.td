@@ -22,8 +22,8 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 def D_Dialect : Dialect {
   let name = "D";
 
-  let summary = "Summary"; //#TODO
-  let description = [{Description}]; //#TODO
+  //let summary = "Summary"; //#TODO
+  //let description = [{Description}]; //#TODO
 
   let cppNamespace = "::mlir::D";
 }
@@ -58,7 +58,7 @@ def AddOp : D_Op<"add", [NoSideEffect, Commutative]> {
 
 // AddFOp FloatLike infers the size of float
 
-def AddFOp : D_Op<"add", [NoSideEffect, Commutative]> {
+def AddFOp : D_Op<"fadd", [NoSideEffect, Commutative]> {
     let summary = "element-wise addition operation";
     let description = [{
         The "addf" operation performs element-wise addition between two values.
@@ -345,7 +345,7 @@ def XorOp : D_Op<"xor"> {
 // Constant/Literal Declaration Ops
 ////////////////////////////////////////////////////////////////////////////////
 
-/*def IntegerOp : D_Op<"int", [NoSideEffect]> {
+def IntegerOp : D_Op<"int", [NoSideEffect]> {
   let summary = "Integer Declaration";
   let description = [{
     IntegerOp operation turns a literal into an SSA value. The data is attached
@@ -441,7 +441,7 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
 
    let hasFolder = 1;
 }
-*/
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cast Operations
 ////////////////////////////////////////////////////////////////////////////////
