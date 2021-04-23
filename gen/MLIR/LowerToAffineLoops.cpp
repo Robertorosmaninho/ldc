@@ -40,14 +40,13 @@ static Value insertAllocAndDealloc(MemRefType type, Location loc,
   auto alloc = rewriter.create<AllocOp>(loc, type);
 
   // Make sure to allocate at the beginning of the block.
-  auto *parentBlock = alloc.getOperation()->getBlock();
-  alloc.getOperation()->moveBefore(&parentBlock->front());
+  auto *parentBlock = alloc->getBlock();
+  alloc->moveBefore(&parentBlock->front());
 
-  // Make sure to deallocate this alloc at the end of the block.
-  // TODO: Analyze the impact of it in control flow
-  // This is fine as toy functions have no control flow.
+  // Make sure to deallocate this alloc at the end of the block. This is fine
+  // as toy functions have no control flow.
   auto dealloc = rewriter.create<DeallocOp>(loc, alloc);
-  dealloc.getOperation()->moveBefore(&parentBlock->back());
+  dealloc->moveBefore(&parentBlock->back());
   return alloc;
 }
 
@@ -59,7 +58,7 @@ static Value insertAllocAndDealloc(MemRefType type, Location loc,
 using LoopIterationFn = function_ref<Value(
     OpBuilder &rewriter, ValueRange memRefOperands, ValueRange loopIvs)>;
 
-static void lowerOpToLoops(Operation *op, ArrayRef<Value> operands,
+static void lowerOpToLoops(Operation *op, ValueRange operands,
                            PatternRewriter &rewriter,
                            LoopIterationFn processIteration) {
   auto tensorType = (*op->result_type_begin()).cast<TensorType>();
@@ -114,10 +113,8 @@ struct BinaryOpLowering : public ConversionPattern {
 
           // Generate loads for the element of 'lhs' and 'rhs' at the inner
           // loop.
-
           auto loadedLhs =
               builder.create<AffineLoadOp>(loc, binaryAdaptor.lhs(), loopIvs);
-
           auto loadedRhs =
               builder.create<AffineLoadOp>(loc, binaryAdaptor.rhs(), loopIvs);
 
@@ -149,11 +146,11 @@ using XorUOpLowering = BinaryOpLowering<D::XorOp, XOrOp>;
 // DToAffine RewritePatterns: Integer operations
 //===----------------------------------------------------------------------===//
 
-/*struct IntegerOpLowering : public OpRewritePattern<D::IntegerOp> {
+struct IntegerOpLowering : public OpRewritePattern<D::IntegerOp> {
   using OpRewritePattern<D::IntegerOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(D::IntegerOp op,
-                                     PatternRewriter &rewriter) const final {
+                                PatternRewriter &rewriter) const final {
     Attribute value = op.value();
     Location loc = op.getLoc();
     DenseElementsAttr constantValue = value.cast<DenseElementsAttr>();
@@ -200,7 +197,7 @@ using XorUOpLowering = BinaryOpLowering<D::XorOp, XOrOp>;
       };
 
       // Start the element storing recursion from the first dimension.
-      storeElements(/*dimension=*//*0);
+      storeElements(/*dimension=*/0);
 
     } else {
 
@@ -225,7 +222,7 @@ using XorUOpLowering = BinaryOpLowering<D::XorOp, XOrOp>;
       };
 
       // Start the element storing recursion from the first dimension.
-      storeElements(/*dimension=*//*0);
+      storeElements(/*dimension=*/0);
     }
 
     // Replace this operation with the generated alloc.
@@ -233,12 +230,12 @@ using XorUOpLowering = BinaryOpLowering<D::XorOp, XOrOp>;
     return success();
   }
 };
-*/
+
 //===----------------------------------------------------------------------===//
 // DToAffine RewritePatterns: Float operations
 //===----------------------------------------------------------------------===//
 
-/*struct FloatOpLowering : public OpRewritePattern<D::FloatOp> {
+struct FloatOpLowering : public OpRewritePattern<D::FloatOp> {
   using OpRewritePattern<D::FloatOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(D::FloatOp op,
@@ -288,18 +285,18 @@ using XorUOpLowering = BinaryOpLowering<D::XorOp, XOrOp>;
     };
 
     // Start the element storing recursion from the first dimension.
-    storeElements(/*dimension=*//*0);
+    storeElements(/*dimension=*/0);
 
     // Replace this operation with the generated alloc.
     rewriter.replaceOp(op, alloc);
     return success();
   }
-};*/
+};
 
 //===----------------------------------------------------------------------===//
 // DToAffine RewritePatterns: Double operations
 //===----------------------------------------------------------------------===//
-/*
+
 struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
   using OpRewritePattern<D::DoubleOp>::OpRewritePattern;
 
@@ -320,9 +317,15 @@ struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
     // operations.
     auto valueShape = memRefType.getShape();
     SmallVector<Value, 8> constantIndices;
-    for (auto i : llvm::seq<int64_t>(
-             0, *std::max_element(valueShape.begin(), valueShape.end())))
-      constantIndices.push_back(rewriter.create<ConstantIndexOp>(loc, i));
+
+    if (!valueShape.empty()) {
+      for (auto i : llvm::seq<int64_t>(
+          0, *std::max_element(valueShape.begin(), valueShape.end())))
+        constantIndices.push_back(rewriter.create<ConstantIndexOp>(loc, i));
+    } else {
+      // This is the case of a tensor of rank 0.
+      constantIndices.push_back(rewriter.create<ConstantIndexOp>(loc, 0));
+    }
 
     // The constant operation represents a multi-dimensional constant, so we
     // will need to generate a store for each of the elements. The following
@@ -350,14 +353,14 @@ struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
     };
 
     // Start the element storing recursion from the first dimension.
-    storeElements(/*dimension=*//*0);
+    storeElements(/*dimension=*/0);
 
     // Replace this operation with the generated alloc.
     rewriter.replaceOp(op, alloc);
     return success();
   }
 };
-*/
+
 //===----------------------------------------------------------------------===//
 // DToAffine RewritePatterns: Cast operations
 //===----------------------------------------------------------------------===//
@@ -461,6 +464,27 @@ struct CastOpLowering : public OpRewritePattern<D::CastOp> {
   }
 };*/
 
+
+//===----------------------------------------------------------------------===//
+// DToAffine RewritePatterns: Return operations
+//===----------------------------------------------------------------------===//
+
+struct ReturnOpLowering : public OpRewritePattern<D::ReturnOp> {
+  using OpRewritePattern<D::ReturnOp>::OpRewritePattern;
+
+  auto matchAndRewrite(D::ReturnOp op,
+                       PatternRewriter &rewriter) const -> LogicalResult final {
+
+   if (op.hasOperand())
+     rewriter.replaceOpWithNewOp<ReturnOp>(op, op->getOperands().back());
+   else
+     rewriter.replaceOpWithNewOp<ReturnOp>(op);
+
+    return success();
+  }
+};
+
+
 //===----------------------------------------------------------------------===//
 // DToAffineLoweringPass
 //===----------------------------------------------------------------------===//
@@ -523,17 +547,18 @@ void DToAffineLoweringPass::runOnFunction() {
 
   target.addIllegalDialect<D::DDialect>();
   // target.addLegalOp<D::StructConstantOp>();
-   target.addLegalOp<D::CastOp>();
+  target.addLegalOp<D::CastOp>();
 
   // Now that the conversion target has been defined, we just need to provide
   // the set of patterns that will lower the Toy operations.
   OwningRewritePatternList patterns;
-  patterns.insert</*IntegerOpLowering, FloatOpLowering, DoubleOpLowering,*/
-                  AddOpLowering, CastOpLowering, AddFOpLowering, SubOpLowering,
+  patterns.insert<IntegerOpLowering, FloatOpLowering, DoubleOpLowering,
+                  AddOpLowering,  AddFOpLowering, SubOpLowering, CastOpLowering,
                   SubFOpLowering, MulOpLowering, MulFOpLowering, DivSOpLowering,
                   DivUOpLowering, DivFOpLowering, ModSOpLowering,
                   ModUOpLowering, ModFOpLowering, AndOpLowering, OrOpLowering,
-                  XorUOpLowering/*, CallOpLowering*/>(&getContext());
+                  XorUOpLowering/*, CallOpLowering*/, ReturnOpLowering
+      >(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`

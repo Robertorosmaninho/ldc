@@ -38,29 +38,27 @@ DDialect::DDialect(mlir::MLIRContext *ctx)
 auto DDialect::materializeConstant(OpBuilder &builder, Attribute value,
                                          Type type, Location loc) -> Operation * {
   Type originalType = type;
-  Operation *op = nullptr;
-
   if (type.isa<TensorType>()) {
     type = type.cast<RankedTensorType>().getElementType();
-}
-
-  //if (type.isa<StructType>())
-  //  op = builder.create<StructConstantOp>(loc, originalType,
-  //                                        value.cast<ArrayAttr>());
-  //else
+  }
+  /*if (type.isa<StructType>())
+    return builder.create<StructConstantOp>(loc, originalType,
+                                                      value.cast<ArrayAttr>());
+  else*/
   if (type.isF16() || type.isF32()) {
-    op = builder.create<D::FloatOp>(loc, originalType,
+    return builder.create<D::FloatOp>(loc, type,
                                     value.cast<DenseElementsAttr>());
   } else if (type.isF64()) {
-    op = builder.create<D::DoubleOp>(loc, originalType,
-                                     value.cast<DenseElementsAttr>());
+    return builder.create<D::DoubleOp>(loc, originalType,
+                                       value.cast<DenseElementsAttr>());
   } else if (type.isInteger(1) || type.isInteger(8) || type.isInteger(16) ||
            type.isInteger(32) || type.isInteger(64) || type.isInteger(128)) {
-    op = builder.create<D::IntegerOp>(loc, originalType,
+    auto op = builder.create<D::IntegerOp>(loc, originalType,
                                       value.cast<DenseElementsAttr>());
-}
-
-  return op;
+    //auto op = builder.create<mlir::ConstantOp>(loc, originalType,
+    //                                           value.cast<DenseElementsAttr>());
+    return op;
+  }
 }
 
 
@@ -155,7 +153,7 @@ static LogicalResult verify(StructAccessOp op) {
 }
 
 //===----------------------------------------------------------------------===//
-// Toy Types
+// D Types
 //===----------------------------------------------------------------------===//
 
 namespace mlir {
@@ -213,7 +211,7 @@ struct StructTypeStorage : public TypeStorage {
   llvm::ArrayRef<Type> elementTypes;
 };
 } // end namespace detail
-} // end namespace toy
+} // end namespace D
 } // end namespace mlir
 
 /// Create an instance of a `StructType` with the given element types. There
@@ -460,7 +458,7 @@ static auto verify(D::ReturnOp op) -> mlir::LogicalResult {
                         << resultType << ")";
 }
 
-/// Parse an instance of a type registered to the toy dialect.
+/// Parse an instance of a type registered to the D dialect.
 auto DDialect::parseType(DialectAsmParser &parser) const -> Type {
   // Parse a struct type in the following form:
   //   struct-type ::= `struct` `<` type (`,` type)* `>`
@@ -505,9 +503,9 @@ auto DDialect::parseType(DialectAsmParser &parser) const -> Type {
   return nullptr;
 }
 
-/// Print an instance of a type registered to the toy dialect.
+/// Print an instance of a type registered to the D dialect.
 void DDialect::printType(Type type, DialectAsmPrinter &printer) const {
-  // Currently the only toy type is a struct type.
+  // Currently the only D type is a struct type.
   //StructType structType = type.cast<StructType>();
 
   // Print the struct type according to the parser format.

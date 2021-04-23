@@ -49,7 +49,7 @@ private:
   void finishLLModule(Module *m);
   void writeAndFreeLLModule(const char *filename);
 #if LDC_MLIR_ENABLED
-  void writeMLIRModule(mlir::OwningModuleRef *module, const char *filename);
+  void writeMLIRModule(mlir::OwningModuleRef &module, const char *filename);
 #endif
 
   llvm::LLVMContext &context_;

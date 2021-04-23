@@ -345,7 +345,7 @@ def XorOp : D_Op<"xor"> {
 // Constant/Literal Declaration Ops
 ////////////////////////////////////////////////////////////////////////////////
 
-def IntegerOp : D_Op<"int", [NoSideEffect]> {
+def IntegerOp : D_Op<"int", [ConstantLike, NoSideEffect]> {
   let summary = "Integer Declaration";
   let description = [{
     IntegerOp operation turns a literal into an SSA value. The data is attached

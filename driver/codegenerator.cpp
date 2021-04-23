@@ -371,7 +371,7 @@ void CodeGenerator::emitMLIR(Module *m) {
     fatal();
   }
 
-  writeMLIRModule(&module, m->objfile.toChars());
+  writeMLIRModule(module, m->objfile.toChars());
 
   if (m->llvmForceLogging && !loggerWasEnabled) {
     Logger::disable();
@@ -379,7 +379,7 @@ void CodeGenerator::emitMLIR(Module *m) {
 }
 
 int runJit(mlir::ModuleOp module) {
-// Initialize LLVM targets.
+  // Initialize LLVM targets.
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
@@ -430,7 +430,7 @@ void emitLLVMIR(mlir::ModuleOp module, const char *filename) {
     fatal();
   }
 
-  // llvm::errs() << *llvmModule << "\n";
+   llvm::errs() << *llvmModule << "\n";
 
   if (llvmModule) {
     llvm::SmallString<128> buffer(filename);
@@ -445,7 +445,7 @@ void emitLLVMIR(mlir::ModuleOp module, const char *filename) {
   }
 }
 
-void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
+void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef &module,
                                     const char *filename) {
   // Write MLIR
   if (global.params.output_mlir) {
@@ -461,7 +461,7 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
     }
 
     mlir::PassManager pm(&mlirContext_);
-    //   pm.addPass(mlir::createInlinerPass());
+    pm.addPass(mlir::createInlinerPass());
 
     // Apply any generic pass manager command line options and run the pipeline.
     mlir::applyPassManagerCLOptions(pm);
@@ -488,10 +488,10 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
     }
 
     if (isLoweringToAffine) {
-      // Finish lowering the toy IR to the LLVM dialect.
-      pm.addPass(mlir::D::createLowerToAffinePass());
-
       mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
+
+      // Finish lowering the toy IR to the LLVM dialect.
+      optPM.addPass(mlir::D::createLowerToAffinePass());
       optPM.addPass(mlir::createCanonicalizerPass());
       optPM.addPass(mlir::createCSEPass());
 
@@ -507,26 +507,26 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef *module,
       pm.addPass(mlir::D::createLowerToLLVMPass());
     }
 
-    if (mlir::failed(pm.run(module->get()))) {
+    if (mlir::failed(pm.run(*module))) {
       IF_LOG Logger::println("Failed on running passes!");
       return;
     }
 
-    if (!module->get()) {
+    if (!*module) {
       IF_LOG Logger::println("Cannot write MLIR file to '%s'",
                              mlirpath.c_str());
       fatal();
     }
 
-    module->get().print(aos);
+    module->print(aos);
 
     if (printLLVMIR) {
-      emitLLVMIR(module->get(), filename);
+      emitLLVMIR(*module, filename);
     }
 
     if (enableJIT) {
       assert(isLoweringToLLVM);
-      runJit(module->get());
+      runJit(*module);
     }
   }
 }

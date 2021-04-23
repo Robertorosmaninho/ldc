@@ -21,6 +21,36 @@ MLIRDeclaration::MLIRDeclaration(
 
 MLIRDeclaration::~MLIRDeclaration() = default;
 
+mlir::Type hasSameTypeAndDims(mlir::Value e1, mlir::Value e2) {
+
+  auto type1 = e1.getType();
+  auto type2 = e2.getType();
+
+  if (auto isTensor = type1.template isa<mlir::TensorType>()) {
+    type1 = type1.cast<mlir::TensorType>().getElementType();
+
+    if (auto isTensor2 = type2.template isa<mlir::TensorType>()) {
+      type2 = type2.cast<mlir::TensorType>().getElementType();
+    }
+
+    // Checking if they have the same dimensions
+    assert(e1.getType().cast<mlir::TensorType>().getRank() ==
+           e2.getType().cast<mlir::TensorType>().getRank());
+  }
+
+  if ((type1.isF16() || type1.isF32() || type1.isF64()) &&
+      (type2.isF16() || type2.isF32() || type2.isF64())) {
+    return mlir::FloatType::getF16(e1.getContext());
+  } else if ((type1.isInteger(8) || type1.isInteger(16) ||
+              type1.isInteger(32) || type1.isInteger(64)) &&
+             (type2.isInteger(8) || type2.isInteger(16) ||
+              type2.isInteger(32) || type2.isInteger(64))) {
+    return mlir::IntegerType::get(e1.getContext(), 1);
+  }
+
+  return mlir::NoneType::get(e1.getContext());
+}
+
 /*mlir::DenseElementsAttr MLIRDeclaration::getConstantAttr(Expression *exp) {
   // The type of this attribute is tensor of 64-bit floating-point with no
   // shape.
@@ -385,10 +415,7 @@ mlir::Value MLIRDeclaration::mlirGen(AndExp *andExp,
     return nullptr;
   }
 
-  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
-       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
-      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
-       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
+  if (hasSameTypeAndDims(e1, e2) == mlir::IntegerType::get(&context, 1)) {
     result = builder.create<mlir::D::AndOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
@@ -694,7 +721,7 @@ mlir::Value MLIRDeclaration::mlirGen(CastExp *castExp) {
                            "implemented");
     _miss++;
   }
-
+  assert(result != nullptr);
   int size = 1;
   if (auto isTensor = result.getType().template isa<mlir::TensorType>())
     size = result.getType().cast<mlir::TensorType>().getNumElements();
@@ -774,13 +801,9 @@ mlir::Value MLIRDeclaration::mlirGen(DivExp *divExp,
     return nullptr;
   }
 
-  if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
-      (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
+  if (hasSameTypeAndDims(e1, e2) == mlir::FloatType::getF16(&context)) {
     result = builder.create<mlir::D::DivFOp>(*location, e1, e2).getResult();
-  } else if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
-              e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
-             (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
-              e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
+  } else if (hasSameTypeAndDims(e1, e2) == mlir::IntegerType::get(&context,1)) {
     if (isSigned)
       result = builder.create<mlir::D::DivSOp>(*location, e1, e2).getResult();
     else
@@ -998,13 +1021,9 @@ mlir::Value MLIRDeclaration::mlirGen(MinExp *minExp,
     return nullptr;
   }
 
-  if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
-      (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
+  if (hasSameTypeAndDims(e1,e2) == mlir::FloatType::getF16(&context)) {
     result = builder.create<mlir::D::SubFOp>(*location, e1, e2).getResult();
-  } else if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
-              e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
-             (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
-              e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
+  } else if (hasSameTypeAndDims(e1,e2) == mlir::IntegerType::get(&context, 1)) {
     result = builder.create<mlir::D::SubOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
@@ -1048,13 +1067,9 @@ mlir::Value MLIRDeclaration::mlirGen(ModExp *modExp,
     return nullptr;
   }
 
-  if ((e1.getType().isF16() || e1.getType().isF32() || e1.getType().isF64()) &&
-      (e2.getType().isF16() || e2.getType().isF32() || e2.getType().isF64())) {
+  if (hasSameTypeAndDims(e1, e2) == mlir::FloatType::getF16(&context)) {
     result = builder.create<mlir::D::ModFOp>(*location, e1, e2).getResult();
-  } else if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
-              e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
-             (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
-              e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
+  } else if (hasSameTypeAndDims(e1, e2) == mlir::IntegerType::get(&context, 1)) {
     if (isSigned)
       result = builder.create<mlir::D::ModSOp>(*location, e1, e2).getResult();
     else
@@ -1097,13 +1112,9 @@ mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp,
 
   auto tensor = e1.getType().cast<mlir::TensorType>();
   auto type = tensor.getElementType();
-  if ((type.isF16() || type.isF32() || type.isF64()) &&
-      (type.isF16() || type.isF32() || type.isF64())) {
+  if (hasSameTypeAndDims(e1, e2) == mlir::FloatType::getF16(&context)) {
     result = builder.create<mlir::D::MulFOp>(*location, e1, e2).getResult();
-  } else if ((type.isInteger(8) || type.isInteger(16) || type.isInteger(32) ||
-              type.isInteger(64)) &&
-             (type.isInteger(8) || type.isInteger(16) || type.isInteger(32) ||
-              type.isInteger(64))) {
+  } else if (hasSameTypeAndDims(e1,e2) == mlir::IntegerType::get(&context, 1)) {
     result = builder.create<mlir::D::MulOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
@@ -1140,10 +1151,7 @@ mlir::Value MLIRDeclaration::mlirGen(OrExp *orExp, OrAssignExp *orAssignExp) {
     return nullptr;
   }
 
-  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
-       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
-      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
-       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
+  if (hasSameTypeAndDims(e1, e2) == mlir::IntegerType::get(&context, 1)) {
     result = builder.create<mlir::D::OrOp>(*location, e1, e2).getResult();
   } else {
     _miss++;
@@ -1159,6 +1167,7 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp) {
   LOG_SCOPE;
 
   mlir::Value e1 = mlirGen(postExp->e1);
+  mlir::Type type1 = e1.getType();
 
   if (e1 == nullptr) {
     _miss++;
@@ -1171,22 +1180,26 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp) {
                            "from 1,8,16,32,64");
   mlir::Value e2 = nullptr;
   mlir::Location location = loc(postExp->loc);
-  auto shapedType = mlir::RankedTensorType::get({}, e1.getType());
+
+  if (auto isTensor = type1.template isa<mlir::TensorType>()) {
+    type1 = type1.cast<mlir::TensorType>().getElementType();
+  }
+  auto shapedType = mlir::RankedTensorType::get(1, type1);
   auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, 1);
-  if (e1.getType().isF32() || e1.getType().isF16())
+  if (type1.isF32() || type1.isF16())
     e2 = builder.create<mlir::D::FloatOp>(location, shapedType, dataAttribute);
-  else if (e1.getType().isF64())
+  else if (type1.isF64())
     e2 = builder.create<mlir::D::DoubleOp>(location, shapedType, dataAttribute);
   else
     e2 = builder.create<mlir::D::IntegerOp>(location, shapedType, dataAttribute);
 
   if (postExp->op == TOKplusplus) {
-    if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
+    if (type1.isF32() || type1.isF16() || type1.isF64())
       return builder.create<mlir::D::AddFOp>(location, e1, e2);
     else
-      return builder.create<mlir::AddIOp>(location, e1, e2);
+      return builder.create<mlir::D::AddOp>(location, e1, e2);
   } else if (postExp->op == TOKminusminus) {
-    if (e1.getType().isF32() || e1.getType().isF16() || e1.getType().isF64())
+    if (type1.isF32() || type1.isF16() || type1.isF64())
       return builder.create<mlir::D::SubFOp>(location, e1, e2);
     else
       return builder.create<mlir::D::SubOp>(location, e1, e2);
@@ -1391,10 +1404,7 @@ mlir::Value MLIRDeclaration::mlirGen(XorExp *xorExp,
     return nullptr;
   }
 
-  if ((e1.getType().isInteger(8) || e1.getType().isInteger(16) ||
-       e1.getType().isInteger(32) || e1.getType().isInteger(64)) &&
-      (e2.getType().isInteger(8) || e2.getType().isInteger(16) ||
-       e2.getType().isInteger(32) || e2.getType().isInteger(64))) {
+  if (hasSameTypeAndDims(e1,e2) == mlir::IntegerType::get(&context, 1)) {
     result = builder.create<mlir::D::XorOp>(*location, e1, e2).getResult();
   } else {
     _miss++;

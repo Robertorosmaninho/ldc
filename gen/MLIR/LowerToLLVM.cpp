@@ -1,15 +1,23 @@
-//====- LowerToLLVM.cpp - Lowering from Affine+Std to LLVM ----------------===//
+//====- LowerToLLVM.cpp - Lowering from D+Affine+Std to LLVM ------------===//
 //
-//                         LDC – the LLVM D compiler
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// This file is distributed under the BSD-style LDC license. See the LICENSE
-// file for details.
+//===----------------------------------------------------------------------===//
 //
-// =============================================================================
+// This file implements full lowering of D operations to LLVM MLIR dialect.
+// 'D.print' is lowered to a loop nest that calls `printf` on each element of
+// the input array. The file also sets up the DToLLVMLoweringPass. This pass
+// lowers the combination of Affine + SCF + Standard dialects to the LLVM one:
 //
-// This file implements a partial lowering of D operations to a combination of
-// affine loops and standard operations. This lowering expects that all calls
-// have been inlined, and all shapes have been resolved.
+//                         Affine --
+//                                  |
+//                                  v
+//                                  Standard --> LLVM (Dialect)
+//                                  ^
+//                                  |
+//     'D.print' --> Loop (SCF) --
 //
 //===----------------------------------------------------------------------===//
 
@@ -31,12 +39,16 @@
 using namespace mlir;
 
 //===----------------------------------------------------------------------===//
+// DToLLVM RewritePatterns
+//===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
 // DToLLVMLoweringPass
 //===----------------------------------------------------------------------===//
 
 namespace {
-struct DToLLVMLoweringPass : public PassWrapper<DToLLVMLoweringPass,
-                                                OperationPass<ModuleOp>> {
+struct DToLLVMLoweringPass
+    : public PassWrapper<DToLLVMLoweringPass, OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<LLVM::LLVMDialect, scf::SCFDialect>();
   }
@@ -48,12 +60,11 @@ void DToLLVMLoweringPass::runOnOperation() {
   // The first thing to define is the conversion target. This will define the
   // final target for this lowering. For this lowering, we are only targeting
   // the LLVM dialect.
-  ConversionTarget target(getContext());
-  target.addLegalDialect<LLVM::LLVMDialect>();
-  target.addLegalOp<ModuleOp>();
+  LLVMConversionTarget target(getContext());
+  target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
 
   // During this lowering, we will also be lowering the MemRef types, that are
-  // currently being operated on, to a representation in LLVM. Do perform this
+  // currently being operated on, to a representation in LLVM. To perform this
   // conversion we use a TypeConverter as part of the lowering. This converter
   // details how one type maps to another. This is necessary now that we will be
   // doing more complicated lowerings, involving loop region arguments.
@@ -74,7 +85,6 @@ void DToLLVMLoweringPass::runOnOperation() {
 
   // The only remaining operation to lower from the `D` dialect, is the
   // PrintOp.
-  // patterns.insert<PrintOpLowering>(&getContext());
 
   // We want to completely lower to LLVM, so we use a `FullConversion`. This
   // ensures that only legal operations will remain after the conversion.

@@ -169,7 +169,7 @@ private:
     // Assuming that the function will only return one value from it's type
     llvm::SmallVector<mlir::Type, 4> ret_types;
 
-    if (!Fd->returns->empty()) {
+    if (!Fd->returns) {
       auto type = get_MLIRtype(nullptr, Fd->type);
       TypeFunction *funcType = static_cast<TypeFunction *>(Fd->type);
       auto ty = funcType->next->ty;

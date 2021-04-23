@@ -143,7 +143,6 @@ else ()
                 ${MLIR_LIB_DIR}/libMLIRParser.a
                 ${MLIR_LIB_DIR}/libMLIRPass.a
                 ${MLIR_LIB_DIR}/libMLIRPresburger.a
-                ${MLIR_LIB_DIR}/libMLIRPublicAPI.dylib
                 ${MLIR_LIB_DIR}/libMLIRQuant.a
                 ${MLIR_LIB_DIR}/libMLIRROCDLIR.a
                 ${MLIR_LIB_DIR}/libMLIRReduce.a
