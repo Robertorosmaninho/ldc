@@ -46,7 +46,7 @@ auto DDialect::materializeConstant(OpBuilder &builder, Attribute value,
                                                       value.cast<ArrayAttr>());
   else*/
   if (type.isF16() || type.isF32()) {
-    return builder.create<D::FloatOp>(loc, type,
+    return builder.create<D::FloatOp>(loc, originalType,
                                     value.cast<DenseElementsAttr>());
   } else if (type.isF64()) {
     return builder.create<D::DoubleOp>(loc, originalType,

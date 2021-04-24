@@ -37,6 +37,7 @@
 #include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -430,9 +431,7 @@ void emitLLVMIR(mlir::ModuleOp module, const char *filename) {
     fatal();
   }
 
-   llvm::errs() << *llvmModule << "\n";
-
-  if (llvmModule) {
+  if (llvmModule.get()) {
     llvm::SmallString<128> buffer(filename);
     llvm::sys::path::replace_extension(
         buffer, llvm::StringRef(global.bc_ext.ptr, global.bc_ext.length));
@@ -440,7 +439,7 @@ void emitLLVMIR(mlir::ModuleOp module, const char *filename) {
     const auto bcpath = std::string(buffer.data(), buffer.size());
     llvm::raw_fd_ostream baba(bcpath, errinfo, llvm::sys::fs::F_None);
     const auto &M = *llvmModule;
-    //llvm::WriteBitcodeToFile(M, baba);
+    llvm::WriteBitcodeToFile(M, baba);
     llvm::errs() << *llvmModule << "\n";
   }
 }

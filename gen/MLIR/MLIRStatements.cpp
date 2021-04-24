@@ -202,15 +202,15 @@ mlir::LogicalResult MLIRStatements::mlirGen(ReturnStatement *returnStatement) {
 
   mlir::Location location = loc(returnStatement->loc);
 
-  if (returnStatement->exp->hasCode()) {
+  /*if (returnStatement->exp->hasCode()) {
     auto expr =
         declaration.mlirGen(returnStatement->exp, builder.getInsertionBlock());
     if (!expr)
       return mlir::failure();
     builder.create<mlir::D::ReturnOp>(location, expr);
-  } else {
+  } else {*/
     builder.create<mlir::D::ReturnOp>(location);
-  }
+  //}  #TODO: Add support for return values
 
   return mlir::success();
 }

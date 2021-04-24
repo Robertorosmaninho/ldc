@@ -169,7 +169,7 @@ private:
     // Assuming that the function will only return one value from it's type
     llvm::SmallVector<mlir::Type, 4> ret_types;
 
-    if (!Fd->returns) {
+    /*if (!Fd->returns) {
       auto type = get_MLIRtype(nullptr, Fd->type);
       TypeFunction *funcType = static_cast<TypeFunction *>(Fd->type);
       auto ty = funcType->next->ty;
@@ -180,7 +180,7 @@ private:
         auto tensorType = type.cast<mlir::TensorType>();
         ret_types.push_back(tensorType);
       }
-    }
+    }*/ // #TODO: Add support for return values
 
     unsigned long size = 0;
     if (Fd->parameters)
@@ -273,11 +273,11 @@ private:
         builder.create<mlir::D::ReturnOp>(
             function.getBody().back().back().getLoc());
       }
-    } else {
+    } /*else { #TODO: Add support for return values
       auto returnType = function.getBody().back().back().operand_type_begin();
       function.setType(builder.getFunctionType(function.getType().getInputs(),
                                                *returnType));
-    }
+    }*/
     return function;
   }
 

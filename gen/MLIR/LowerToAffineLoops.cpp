@@ -420,10 +420,10 @@ struct CastOpLowering : public OpRewritePattern<D::CastOp> {
 
           Operation *NewOp = nullptr;
 
-          if (SizeIsGreaterThan(in, out))
+          if (SizeIsGreaterThan(out, in))
             NewOp = builder.create<TruncateIOp>(loc, loadedLhs,
                                                  loadedRhs.getType());
-          else if (SizeIsGreaterThan(out, in))
+          else if (SizeIsGreaterThan(in, out))
             NewOp = builder.create<ZeroExtendIOp>(loc, loadedLhs,
                                                    loadedRhs.getType());
           else if ((in.isF64() && (out.isF32() || out.isF16())) ||
@@ -434,9 +434,9 @@ struct CastOpLowering : public OpRewritePattern<D::CastOp> {
                    (in.isF16() && out.isF32()))
             NewOp = builder.create<FPExtOp>(loc, loadedLhs,
                                              loadedRhs.getType());
-            // FPToSIOp is only available on LLVM 11
+
           else if (isInteger(in) == 2 && isInteger(out) == 1)
-            NewOp = builder.create<D::CastOp>(loc, loadedLhs,
+            NewOp = builder.create<FPToSIOp>(loc, loadedLhs,
                                                loadedRhs.getType());
           else if (isInteger(in) == 1 && isInteger(out) == 2)
             NewOp = builder.create<SIToFPOp>(loc, loadedLhs,
@@ -474,11 +474,11 @@ struct ReturnOpLowering : public OpRewritePattern<D::ReturnOp> {
 
   auto matchAndRewrite(D::ReturnOp op,
                        PatternRewriter &rewriter) const -> LogicalResult final {
-
-   if (op.hasOperand())
-     rewriter.replaceOpWithNewOp<ReturnOp>(op, op->getOperands().back());
-   else
-     rewriter.replaceOpWithNewOp<ReturnOp>(op);
+    if (op.hasOperand()) {
+      rewriter.replaceOpWithNewOp<ReturnOp>(op, op->getOperands());
+    } else {
+       rewriter.replaceOpWithNewOp<ReturnOp>(op);
+    }
 
     return success();
   }
@@ -547,7 +547,7 @@ void DToAffineLoweringPass::runOnFunction() {
 
   target.addIllegalDialect<D::DDialect>();
   // target.addLegalOp<D::StructConstantOp>();
-  target.addLegalOp<D::CastOp>();
+ // target.addLegalOp<D::CastOp>();
 
   // Now that the conversion target has been defined, we just need to provide
   // the set of patterns that will lower the Toy operations.
