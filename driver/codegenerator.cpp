@@ -460,7 +460,7 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef &module,
     }
 
     mlir::PassManager pm(&mlirContext_);
-    pm.addPass(mlir::createInlinerPass());
+    //pm.addPass(mlir::createInlinerPass());
 
     // Apply any generic pass manager command line options and run the pipeline.
     mlir::applyPassManagerCLOptions(pm);
@@ -471,31 +471,17 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef &module,
     bool enableJIT = global.params.runJIT;
     bool enableOpt = global.params.enableOpt;
 
-    if (enableOpt || isLoweringToAffine) {
-      // Inline all functions into main and then delete them.
-      pm.addPass(mlir::createInlinerPass());
-
-      mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
-      optPM.addPass(mlir::createCanonicalizerPass());
-      optPM.addPass(mlir::createCSEPass());
-
-      // Add optimizations if enabled.
-      if (enableOpt) {
-        optPM.addPass(mlir::createLoopFusionPass());
-        optPM.addPass(mlir::createMemRefDataFlowOptPass());
-      }
-    }
-
+    //module->dump();
     if (isLoweringToAffine) {
       mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
 
       // Finish lowering the toy IR to the LLVM dialect.
       optPM.addPass(mlir::D::createLowerToAffinePass());
-      optPM.addPass(mlir::createCanonicalizerPass());
-      optPM.addPass(mlir::createCSEPass());
 
       // Add optimizations if enabled.
       if (enableOpt) {
+        optPM.addPass(mlir::createCanonicalizerPass());
+        optPM.addPass(mlir::createCSEPass());
         optPM.addPass(mlir::createLoopFusionPass());
         optPM.addPass(mlir::createMemRefDataFlowOptPass());
       }

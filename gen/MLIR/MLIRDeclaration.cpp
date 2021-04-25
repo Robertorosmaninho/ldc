@@ -21,6 +21,54 @@ MLIRDeclaration::MLIRDeclaration(
 
 MLIRDeclaration::~MLIRDeclaration() = default;
 
+int isInteger(mlir::Type type) {
+  if (type.isInteger(1))
+    return 1;
+  else if (type.isInteger(8))
+    return 8;
+  else if (type.isInteger(16))
+    return 16;
+  else if (type.isInteger(32))
+    return 32;
+  else if (type.isInteger(64))
+    return 64;
+  else
+    return 0;
+}
+
+int isReal(mlir::Type type) {
+  if (type.isF16())
+    return 16;
+  else if (type.isF32())
+    return 32;
+  else if (type.isF64())
+    return 64;
+  else
+    return 0;
+}
+
+void collectIntData(std::vector<mlir::APInt> &data,
+                    ArrayLiteralExp *arrayLiteralExp, int size) {
+  for (auto element : *arrayLiteralExp->elements) {
+    if (element->isArrayLiteralExp())
+      collectIntData(data, element->isArrayLiteralExp(), size);
+    else
+      data.push_back(APInt(size, element->toInteger()));
+  }
+}
+
+void collectFloatData(std::vector<mlir::APFloat> &data, ArrayLiteralExp
+*arrayLiteralExp, bool isDouble) {
+  for (auto element : *arrayLiteralExp->elements) {
+    if (element->isArrayLiteralExp())
+      collectFloatData(data, element->isArrayLiteralExp(), isDouble);
+    else if (isDouble)
+      data.push_back(APFloat((double)element->toReal()));
+    else
+      data.push_back(APFloat((float)element->toReal()));
+  }
+}
+
 mlir::Type hasSameTypeAndDims(mlir::Value e1, mlir::Value e2) {
 
   auto type1 = e1.getType();
@@ -38,13 +86,9 @@ mlir::Type hasSameTypeAndDims(mlir::Value e1, mlir::Value e2) {
            e2.getType().cast<mlir::TensorType>().getRank());
   }
 
-  if ((type1.isF16() || type1.isF32() || type1.isF64()) &&
-      (type2.isF16() || type2.isF32() || type2.isF64())) {
+  if (isReal(type1) && isReal(type2)) {
     return mlir::FloatType::getF16(e1.getContext());
-  } else if ((type1.isInteger(8) || type1.isInteger(16) ||
-              type1.isInteger(32) || type1.isInteger(64)) &&
-             (type2.isInteger(8) || type2.isInteger(16) ||
-              type2.isInteger(32) || type2.isInteger(64))) {
+  } else if (isInteger(type1) && isInteger(type2)) {
     return mlir::IntegerType::get(e1.getContext(), 1);
   }
 
@@ -372,8 +416,12 @@ mlir::Value MLIRDeclaration::mlirGen(AddExp *addExp,
     _miss++;
     return nullptr;
   }
-  auto tensor = e1.getType().cast<mlir::TensorType>();
-  auto type = tensor.getElementType();
+
+  auto type = e1.getType();
+  if (auto isTensor = type.template isa<mlir::TensorType>()) {
+    type = type.cast<mlir::TensorType>().getElementType();
+  }
+
   if (type.isF16() || type.isF32() || type.isF64()) {
     result = builder.create<mlir::D::AddFOp>(*location, e1, e2).getResult();
   } else if (type.isInteger(8) || type.isInteger(16) || type.isInteger(32) ||
@@ -437,70 +485,39 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp) {
 
   // The type of this attribute is tensor the type of the literal with it's
   // shape .
-  mlir::Type elementType = get_MLIRtype(arrayLiteralExp->elements->front());
-  bool isFloat =
-      elementType.isF16() || elementType.isF32() || elementType.isF64();
+  mlir::Type elementType = get_MLIRtype(arrayLiteralExp);
+  mlir::TensorType tensorType = nullptr;
+  mlir::Location Loc = loc(arrayLiteralExp->loc);
 
-  int size = 0;
-  if (elementType.isInteger(1))
-    size = 1;
-  else if (elementType.isInteger(8))
-    size = 8;
-  else if (elementType.isInteger(16))
-    size = 16;
-  else if (elementType.isInteger(32))
-    size = 32;
-  else if (elementType.isInteger(64))
-    size = 64;
-  else if (!isFloat)
+  if (auto isTensor = elementType.template isa<mlir::TensorType>()) {
+    tensorType = elementType.cast<mlir::TensorType>();
+    elementType = tensorType.getElementType();
+  }
+
+  int isFloat = isReal(elementType);
+  int size = isInteger(elementType);
+
+  if (!isFloat && !size)
     IF_LOG Logger::println("MLIR doesn't support integer of type different "
                            "from 1,8,16,32,64");
 
   std::vector<mlir::APInt> data;
   std::vector<mlir::APFloat> dataF; // Used by float and double
-  mlir::Location Loc = loc(arrayLiteralExp->loc);
-
-  for (auto e : *arrayLiteralExp->elements) {
-    if (elementType.isInteger(size)) {
-      mlir::APInt integer(size, e->toInteger(), !e->type->isunsigned());
-      data.push_back(integer);
-    } else if (isFloat) {
-      if (elementType.isF64()) {
-        mlir::APFloat apFloat((double)e->toReal());
-        dataF.push_back(apFloat);
-      } else {
-        mlir::APFloat apFloat((float)e->toReal());
-        dataF.push_back(apFloat);
-      }
-    } else {
-      _miss++;
-      return nullptr;
-    }
-  }
-
-  // For now lets assume one-dimensional arrays
-  std::vector<int64_t> dims;
-  // dims.push_back(1);
-  if (elementType.isInteger(size))
-    dims.push_back(data.size());
-  else if (isFloat)
-    dims.push_back(dataF.size());
-
-  // Getting the shape of the tensor. Ex.: tensor<4xf64>
-  auto dataType = mlir::RankedTensorType::get(dims, elementType);
 
   // Set the actual attribute that holds the list of values for this
   // tensor literal and build the operation.
-  if (elementType.isInteger(size)) {
-    auto dataAttributes = mlir::DenseElementsAttr::get(dataType, data);
-    return builder.create<mlir::D::IntegerOp>(Loc, dataType, dataAttributes);
+  if (isFloat == 64) {
+    collectFloatData(dataF, arrayLiteralExp, isFloat == 64);
+    auto dataAttributes = mlir::DenseElementsAttr::get(tensorType, dataF);
+    return builder.create<mlir::D::DoubleOp>(Loc, tensorType, dataAttributes);
   } else if (isFloat) {
-    auto dataAttributes = mlir::DenseElementsAttr::get(dataType, dataF);
-    if (elementType.isF64())
-      return builder.create<mlir::D::DoubleOp>(Loc, dataType,
-                                               dataAttributes);
-    else
-      return builder.create<mlir::D::FloatOp>(Loc, dataType, dataAttributes);
+    collectFloatData(dataF, arrayLiteralExp, isFloat == 64);
+    auto dataAttributes = mlir::DenseElementsAttr::get(tensorType, dataF);
+    return builder.create<mlir::D::FloatOp>(Loc, tensorType, dataAttributes);
+  } else if (size) {
+    collectIntData(data, arrayLiteralExp, size);
+    auto dataAttributes = mlir::DenseElementsAttr::get(tensorType, data);
+    return builder.create<mlir::D::IntegerOp>(Loc, tensorType, dataAttributes);
   } else {
     _miss++;
     Logger::println("Unable to build ArrayLiteralExp: '%s'",
@@ -898,8 +915,19 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, int func) {
   mlir::CmpIPredicate predicate;
   mlir::CmpFPredicate predicateF;
 
-  bool isFloat =
-      e1.getType().isF64() || e1.getType().isF32() || e1.getType().isBF16();
+  mlir::Type type1 = e1.getType();
+  if (auto isTensor = type1.template isa<mlir::TensorType>()) {
+    auto tensorType = type1.cast<mlir::TensorType>();
+
+    int rank = tensorType.getRank();
+    int dim = tensorType.getDimSize(0);
+
+    if (rank == 1 && dim == 1) {
+      e1 = builder.create<mlir::ConstantOp>(location, e1.getDefiningOp()->getAttr("value").cast<mlir::DenseElementsAttr>().getValue(0));
+      e2 = builder.create<mlir::ConstantOp>(location, e2.getDefiningOp()->getAttr("value").cast<mlir::DenseElementsAttr>().getValue(0));
+    }
+  }
+  bool isFloat = isReal(type1);
 
   switch (cmpExp->op) {
   case TOKlt:
@@ -952,6 +980,63 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, int func) {
     return builder.create<mlir::CmpFOp>(location, predicateF, e1, e2);
   else
     return builder.create<mlir::CmpIOp>(location, predicate, e1, e2);
+}
+
+mlir::Value MLIRDeclaration::mlirGen(IndexExp *indexExp) {
+  IF_LOG Logger::print("MLIRCodeGen -IndexExp: %s @ %s\n", indexExp->toChars(),
+                       indexExp->type->toChars());
+  LOG_SCOPE;
+  auto location = loc(indexExp->loc);
+
+  Logger::print("e1 ou l: %s\n", indexExp->e1->toChars());
+  Logger::print("e2 ou r: %s\n",indexExp->e2->toChars());
+
+  // Generation or getting the array
+  auto l = mlirGen(indexExp->e1);
+
+  if (!l) {
+    IF_LOG Logger::println("Expression: %s", indexExp->toChars());
+    llvm_unreachable("Unknown IndexExp target.");
+  }
+
+  // At this point we hope that the tensor has only one dimension
+  mlir::TensorType tensorType = l.getType().cast<mlir::TensorType>();
+  int dims = tensorType.getDimSize(0);
+
+  // Index in D is usually `cast(ulong)i` so we skip the cast part to get the
+  // value
+  mlir::Operation *op = mlirGen(indexExp->e2->isCastExp()->e1).getDefiningOp();
+  auto denseValues = op->getAttr("value").cast<mlir::DenseElementsAttr>().getIntValues();
+  mlir::APInt value = denseValues.begin().operator*();
+
+  // Finally we extract the value that we can use
+  int index = value.getSExtValue();
+
+  if (index > dims)
+    llvm_unreachable("index out of bounds");
+
+  op = l.getDefiningOp();
+  if (auto attr = op->getAttr("value").cast<mlir::DenseElementsAttr>()) {
+    auto attrValue = attr.getValue(index);
+    auto attrType = mlir::RankedTensorType::get(1, tensorType.getElementType());
+
+    int sizeInt = isInteger(tensorType.getElementType());
+    int sizeFloat = isReal(tensorType.getElementType());
+
+    if (sizeInt) {
+      return builder.create<mlir::D::IntegerOp>(location, attrType, attrValue);
+    } else if (sizeFloat == 64) {
+      return builder.create<mlir::D::FloatOp>(location, attrType, attrValue);
+    } else if (sizeFloat){
+      return builder.create<mlir::D::DoubleOp>(location, attrType, attrValue);
+    } else {
+      _miss++;
+      llvm_unreachable("unkown operation");
+    }
+
+  }
+  else
+    llvm_unreachable("unkown operation");
 }
 
 mlir::Value MLIRDeclaration::mlirGen(IntegerExp *integerExp) {
@@ -1110,8 +1195,6 @@ mlir::Value MLIRDeclaration::mlirGen(MulExp *mulExp,
     return nullptr;
   }
 
-  auto tensor = e1.getType().cast<mlir::TensorType>();
-  auto type = tensor.getElementType();
   if (hasSameTypeAndDims(e1, e2) == mlir::FloatType::getF16(&context)) {
     result = builder.create<mlir::D::MulFOp>(*location, e1, e2).getResult();
   } else if (hasSameTypeAndDims(e1,e2) == mlir::IntegerType::get(&context, 1)) {
@@ -1480,6 +1563,8 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression,
     return mlirGen(declarationExp);
   else if (CastExp *castExp = expression->isCastExp())
     return mlirGen(castExp);
+  else if (IndexExp *indexExp = expression->isIndexExp())
+    return mlirGen(indexExp);
   else if (IntegerExp *integerExp = expression->isIntegerExp())
     return mlirGen(integerExp);
   else if (RealExp *realExp = expression->isRealExp())
@@ -1547,6 +1632,9 @@ mlir::Type MLIRDeclaration::get_MLIRtype(Expression *expression, Type *type) {
   else
     basetype = expression->type->toBasetype();
 
+  IF_LOG Logger::println("MLIRCodeGen - Getting type `%s`",
+                         basetype->toChars());
+
   if (basetype->ty == Tchar || basetype->ty == Twchar ||
       basetype->ty == Tdchar || basetype->ty == Tnull ||
       basetype->ty == Tvoid || basetype->ty == Tnone) {
@@ -1571,8 +1659,26 @@ mlir::Type MLIRDeclaration::get_MLIRtype(Expression *expression, Type *type) {
     _miss++; // TODO: Build F80 type on DDialect
   } else if (basetype->ty == Tvector || basetype->ty == Tarray ||
              basetype->ty == Taarray) {
-    mlir::UnrankedTensorType tensor;
-    return tensor;
+    //auto e1 = expression->isArrayExp();
+    auto e2 = expression->isArrayLiteralExp();
+    //auto e3 = expression->isVectorExp();
+    //auto e4 = expression->isVectorArrayExp();
+    std::vector<int64_t> shape;
+    auto size = e2->elements->size();
+    shape.push_back(size);
+
+    auto elementType = get_MLIRtype(e2->elements->front());
+    if (bool isTensor = elementType.template isa<mlir::TensorType>()) {
+      auto tensorType = elementType.cast<mlir::TensorType>();
+      auto insideShape = tensorType.getShape();
+      for (auto value : insideShape)
+        shape.push_back(value);
+      elementType = tensorType.getElementType();
+    }
+
+    auto shapedType = mlir::RankedTensorType::get(llvm::makeArrayRef(shape),
+                                                  elementType);
+    return shapedType;
   } else if (basetype->ty == Tsarray) {
     auto size = basetype->isTypeSArray()->dim->toInteger();
     return mlir::RankedTensorType::get(
