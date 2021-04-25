@@ -134,6 +134,7 @@ public:
                       XorAssignExp *xorAssignExp = nullptr);
   void mlirGen(TemplateInstance *templateInstance);
 
+  mlir::Value mlirPrint(Expression *expression);
   /// Set MLIR Location using D Loc info
   mlir::Location loc(Loc loc) {
     return builder.getFileLineColLoc(

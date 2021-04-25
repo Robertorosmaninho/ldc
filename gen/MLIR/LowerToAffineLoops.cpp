@@ -546,6 +546,7 @@ void DToAffineLoweringPass::runOnFunction() {
   // to lower as `legal`.
 
   target.addIllegalDialect<D::DDialect>();
+  target.addLegalOp<D::PrintOp>();
   // target.addLegalOp<D::StructConstantOp>();
  // target.addLegalOp<D::CastOp>();
 

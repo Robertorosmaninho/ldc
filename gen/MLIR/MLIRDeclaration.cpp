@@ -518,11 +518,11 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp) {
     collectIntData(data, arrayLiteralExp, size);
     auto dataAttributes = mlir::DenseElementsAttr::get(tensorType, data);
     return builder.create<mlir::D::IntegerOp>(Loc, tensorType, dataAttributes);
-  } else {
-    _miss++;
-    Logger::println("Unable to build ArrayLiteralExp: '%s'",
-                    arrayLiteralExp->toChars());
   }
+  _miss++;
+  Logger::println("Unable to build ArrayLiteralExp: '%s'",
+                  arrayLiteralExp->toChars());
+  return nullptr;
 }
 
 mlir::Value MLIRDeclaration::mlirGen(AssignExp *assignExp) {
@@ -993,6 +993,8 @@ mlir::Value MLIRDeclaration::mlirGen(IndexExp *indexExp) {
 
   // Generation or getting the array
   auto l = mlirGen(indexExp->e1);
+  mlir::Operation *op;
+  int index;
 
   if (!l) {
     IF_LOG Logger::println("Expression: %s", indexExp->toChars());
@@ -1005,12 +1007,17 @@ mlir::Value MLIRDeclaration::mlirGen(IndexExp *indexExp) {
 
   // Index in D is usually `cast(ulong)i` so we skip the cast part to get the
   // value
-  mlir::Operation *op = mlirGen(indexExp->e2->isCastExp()->e1).getDefiningOp();
-  auto denseValues = op->getAttr("value").cast<mlir::DenseElementsAttr>().getIntValues();
-  mlir::APInt value = denseValues.begin().operator*();
+  if (indexExp->e2->isCastExp()) {
+     op = mlirGen(indexExp->e2->isCastExp()->e1).getDefiningOp();
+    auto denseValues =
+        op->getAttr("value").cast<mlir::DenseElementsAttr>().getIntValues();
+    mlir::APInt value = denseValues.begin().operator*();
 
-  // Finally we extract the value that we can use
-  int index = value.getSExtValue();
+    // Finally we extract the value that we can use
+     index = value.getSExtValue();
+  } else {
+    index = indexExp->e2->toInteger();
+  }
 
   if (index > dims)
     llvm_unreachable("index out of bounds");
@@ -1019,16 +1026,17 @@ mlir::Value MLIRDeclaration::mlirGen(IndexExp *indexExp) {
   if (auto attr = op->getAttr("value").cast<mlir::DenseElementsAttr>()) {
     auto attrValue = attr.getValue(index);
     auto attrType = mlir::RankedTensorType::get(1, tensorType.getElementType());
+    auto attrDense = mlir::DenseElementsAttr::get(attrType, attrValue);
 
     int sizeInt = isInteger(tensorType.getElementType());
     int sizeFloat = isReal(tensorType.getElementType());
 
     if (sizeInt) {
-      return builder.create<mlir::D::IntegerOp>(location, attrType, attrValue);
+      return builder.create<mlir::D::IntegerOp>(location, attrType, attrDense);
     } else if (sizeFloat == 64) {
-      return builder.create<mlir::D::FloatOp>(location, attrType, attrValue);
+      return builder.create<mlir::D::FloatOp>(location, attrType, attrDense);
     } else if (sizeFloat){
-      return builder.create<mlir::D::DoubleOp>(location, attrType, attrValue);
+      return builder.create<mlir::D::DoubleOp>(location, attrType, attrDense);
     } else {
       _miss++;
       llvm_unreachable("unkown operation");
@@ -1557,6 +1565,11 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression,
 
   int op = expression->op;
 
+  std::string name = expression->toChars();
+  if (name.substr(0,5) == "write") {
+    return mlirPrint(expression);
+  }
+
   if (VarExp *varExp = expression->isVarExp())
     return mlirGen(varExp);
   else if (DeclarationExp *declarationExp = expression->isDeclarationExp())
@@ -1617,6 +1630,20 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression,
                          "'%s'",
                          expression->toChars(), expression->op,
                          expression->type->toChars());
+  return nullptr;
+}
+
+mlir::Value MLIRDeclaration::mlirPrint(Expression *expression) {
+  IF_LOG Logger::println("PrintExp: %s", expression->isCallExp()->toChars());
+  LOG_SCOPE
+
+  CallExp *callExp = expression->isCallExp();
+  mlir::Location location = loc(callExp->loc);
+
+  for (auto arg : *callExp->arguments){
+    auto mlirArg = mlirGen(arg);
+    return builder.create<mlir::D::PrintOp>(location, mlirArg)->getResult(0);
+  }
   return nullptr;
 }
 

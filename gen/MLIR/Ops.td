@@ -371,6 +371,24 @@ def IntegerOp : D_Op<"int", [ConstantLike, NoSideEffect]> {
    //     [{ build(builder, result, value.getType(), value); }]>
   ];
 
+/*
+
+  // Specify a parser and printer method.
+    let parser = [{ return ::parseConstantOp(parser, result); }];
+    let printer = [{ return ::print(p, *this); }];
+
+  let builders = [
+    // Build a constant with a given constant integer value.
+    OpBuilderDAG<(ins "Type":$type, "int":$value, "int":$size)>,
+
+    OpBuilderDAG<(ins "DenseElementsAttr":$value),
+        [{ build($_builder, $_state, value.getType(), value); }]>
+  ];
+
+    // Invoke a static verify method to verify this constant operation.
+      let verifier = [{ return ::verify(*this); }];
+  let hasFolder = 1;
+*/
   let hasFolder = 1;
 }
 
@@ -509,4 +527,23 @@ def ReturnOp : D_Op<"return", [NoSideEffect,  Terminator]> {
     // Invoke a static verify method to verify this return operation.
     let verifier = [{ return ::verify(*this); }];
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Temporary Print Operation
+////////////////////////////////////////////////////////////////////////////////
+
+def PrintOp : D_Op<"print"> {
+  let summary = "print operation";
+  let description = [{
+    The "print" builtin operation prints a given input tensor, and produces
+    no results.
+  }];
+
+  // The print operation takes an input tensor to print.
+  // We also allow a F64MemRef to enable interop during partial lowering.
+  let arguments = (ins AnyType:$input);
+
+  let assemblyFormat = "$input attr-dict `:` type($input)";
+}
+
 #endif // D_OPS

@@ -1,2 +1,5 @@
 /gen/MLIR/Ops.cpp.inc
 /gen/MLIR/Ops.h.inc
+/gen/MLIR/Dialect.h.inc
+/cmake-build-debug/
+/cmake-build-debug2/
