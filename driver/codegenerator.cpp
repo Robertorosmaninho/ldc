@@ -471,12 +471,13 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef &module,
     bool enableJIT = global.params.runJIT;
     bool enableOpt = global.params.enableOpt;
 
-    //module->dump();
+    module->dump();
     if (isLoweringToAffine) {
       mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
 
       // Finish lowering the toy IR to the LLVM dialect.
-      optPM.addPass(mlir::D::createLowerToAffinePass());
+      optPM.addPass(mlir::D::createValueToBlockArgumentPass());
+//      optPM.addPass(mlir::D::createLowerToAffinePass());
 
       // Add optimizations if enabled.
       if (enableOpt) {
@@ -504,6 +505,8 @@ void CodeGenerator::writeMLIRModule(mlir::OwningModuleRef &module,
     }
 
     module->print(aos);
+    //module->getRegion().viewGraph();
+    //module->dump();
 
     if (printLLVMIR) {
       emitLLVMIR(*module, filename);

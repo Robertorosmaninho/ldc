@@ -552,7 +552,7 @@ set(LDC_LIB LDCShared)
 set(LDC_LIB_EXTRA_SOURCES "")
 if(MSVC_IDE) # Visual Studio generator
     # Add the .d files as (Visual D) source files to this lib, so that they show up somewhere.
-    set(LDC_LIB_EXTRA_SOURCES ${LDC_D_SOURCE_FILES})
+    set(LDC_LIB_EXTRA_SOURCES ${LDC_D_SOURCE_FILES} gen/MLIR/ValueToBlockArgument.cpp)
     set_property(SOURCE ${LDC_LIB_EXTRA_SOURCES} PROPERTY VS_TOOL_OVERRIDE "DCompile")
     # 'Clear' the original list for the custom commands below, producing ldc2.exe and ldc2-unittest.exe -
     # we still need a dummy .d file.

@@ -460,6 +460,24 @@ def DoubleOp : D_Op<"double", [NoSideEffect]> {
    let hasFolder = 1;
 }
 
+def ArrayDoubleOp : D_Op<"arrayDouble", [NoSideEffect]> {
+  let summary = "Double Declaration";
+  let description = [{
+    DoubleOp operation turns a literal into an SSA value. The data is attached
+    to the operation as an attribute. For example:
+
+    ```mlir
+      %0 = "D.arrayDouble"() {value = [10.00000, 5.00000] : tensor<2xf64>} : () -> tensor<2xf64>
+    ```
+  }];
+
+  // The DoubleOp operation takes an attribute as the only input.
+  let arguments = (ins AnyAttr:$value);
+
+  // The constant operation returns a single value of TensorType.
+  let results = (outs AnyType);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cast Operation
 ////////////////////////////////////////////////////////////////////////////////
@@ -541,7 +559,7 @@ def PrintOp : D_Op<"print"> {
 
   // The print operation takes an input tensor to print.
   // We also allow a F64MemRef to enable interop during partial lowering.
-  let arguments = (ins AnyType:$input);
+  let arguments = (ins AnyTypeOf<[F64Tensor, F64MemRef]>:$input);
 
   let assemblyFormat = "$input attr-dict `:` type($input)";
 }

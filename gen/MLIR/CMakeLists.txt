@@ -1,30 +1,30 @@
+
 set(var "")
 mlir_tablegen(MLIR
         TARGET
-            H
+        H
         OUTS
-            Ops.h.inc
+        Ops.h.inc
         FLAG
-            -gen-op-decls
+        -gen-op-decls
         SRCS
-            ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)
+        ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)
 mlir_tablegen(MLIR
         TARGET
-            CPP
+        CPP
         OUTS
-            Ops.cpp.inc
+        Ops.cpp.inc
         FLAG
-            -gen-op-defs
+        -gen-op-defs
         SRCS
-            ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)
+        ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)
 
 mlir_tablegen(MLIR
         TARGET
-            Dialect
+        Dialect
         OUTS
-            Dialect.h.inc
+        Dialect.h.inc
         FLAG
-            -gen-dialect-decls
+        -gen-dialect-decls
         SRCS
-            ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)
-
+        ${CMAKE_CURRENT_SOURCE_DIR}/Ops.td)

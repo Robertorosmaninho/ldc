@@ -31,7 +31,7 @@ namespace detail {
 struct StructTypeStorage;
 } // end namespace detail
 
-/// This is the definition of the Toy dialect. A dialect inherits from
+/// This is the definition of the D dialect. A dialect inherits from
 /// mlir::Dialect and registers custom attributes, operations, and types (in its
 /// constructor). It can also override some general behavior exposed via virtual
 /// methods.
@@ -40,8 +40,8 @@ public:
    explicit DDialect(mlir::MLIRContext *ctx);
 
   /// A hook used to materialize constant values with the given type.
-  Operation *materializeConstant(OpBuilder &builder, Attribute value, Type type,
-                                 Location loc) override;
+  //Operation *materializeConstant(OpBuilder &builder, Attribute value, Type
+//type, Location loc) override;
 
   /// Parse an instance of a type registered to the toy dialect.
   mlir::Type parseType(mlir::DialectAsmParser &parser) const override;

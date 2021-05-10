@@ -138,7 +138,12 @@ void MLIRStatements::mlirGen(IfStatement *ifStatement) {
 
   // Getting back to the old insertion point
   builder.setInsertionPointAfter(&insert->back());
-
+auto attr = cond.getDefiningOp()->getResultTypes();//->getAttr("value");
+                 // .cast<mlir::DenseElementsAttr>().getValue(0);
+for (auto retType : attr)
+  retType.dump();
+  //auto test = builder.create<mlir::ConstantOp>(location, attr);
+  //test.dump();
   // TODO: Make args to block generic -> phi nodes
   mlir::ValueRange args = {}; // Args to block
   if (ifStatement->elsebody)
@@ -148,6 +153,7 @@ void MLIRStatements::mlirGen(IfStatement *ifStatement) {
     builder.create<mlir::CondBranchOp>(location, cond, if_then, args, end_if,
                                        args);
 
+  //mlir::AffineForOp
   // After create the branch operation we can fill each block with their
   // operations
   builder.setInsertionPointToStart(if_then);

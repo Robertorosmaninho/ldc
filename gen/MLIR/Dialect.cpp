@@ -35,22 +35,25 @@ DDialect::DDialect(mlir::MLIRContext *ctx)
   //addTypes<StructType>();
 }
 
-auto DDialect::materializeConstant(OpBuilder &builder, Attribute value,
-                                         Type type, Location loc) -> Operation * {
+/*mlir::Operation *DDialect::materializeConstant(OpBuilder &builder,
+                                               Attribute value,
+                                               Type type, Location loc) {
   Type originalType = type;
   if (type.isa<TensorType>()) {
     type = type.cast<RankedTensorType>().getElementType();
   }
-  /*if (type.isa<StructType>())
-    return builder.create<StructConstantOp>(loc, originalType,
-                                                      value.cast<ArrayAttr>());
-  else*/
+  //if (type.isa<StructType>())
+  //  return builder.create<StructConstantOp>(loc, originalType,
+  //                                                    value.cast<ArrayAttr>());
+  //else
   if (type.isF16() || type.isF32()) {
     return builder.create<D::FloatOp>(loc, originalType,
                                     value.cast<DenseElementsAttr>());
   } else if (type.isF64()) {
-    return builder.create<D::DoubleOp>(loc, originalType,
-                                       value.cast<DenseElementsAttr>());
+    auto op = builder.create<D::DoubleOp>(loc, originalType,
+                                          value.cast<DenseElementsAttr>());
+    op->dump();
+    return op;
   } else if (type.isInteger(1) || type.isInteger(8) || type.isInteger(16) ||
            type.isInteger(32) || type.isInteger(64) || type.isInteger(128)) {
     auto op = builder.create<D::IntegerOp>(loc, originalType,
@@ -60,7 +63,7 @@ auto DDialect::materializeConstant(OpBuilder &builder, Attribute value,
     return op;
   }
 }
-
+*/
 
 //===----------------------------------------------------------------------===//
 // D Operations
@@ -412,9 +415,11 @@ void D::FloatOp::build(OpBuilder &builder, OperationState &state, Type type,
 void D::DoubleOp::build(OpBuilder &builder, OperationState &state, Type type,
                         double value) {
   if (type.isF64()) {
-    auto shapedType = RankedTensorType::get(1, builder.getF64Type());
-    auto dataAttribute = DenseElementsAttr::get(shapedType, value);
-    FloatOp::build(builder, state, shapedType, dataAttribute);
+    //auto shapedType = RankedTensorType::get(1, builder.getF64Type());
+    //auto dataAttribute = DenseElementsAttr::get(shapedType, value);
+    auto doubleType = Float64Type::get(builder.getContext());
+    auto dataAttribute = FloatAttr::get(doubleType, value);
+    DoubleOp::build(builder, state, doubleType, dataAttribute);
   } else {
     IF_LOG Logger::println("Unable to get the Attribute for %f", value);
   }

@@ -102,6 +102,15 @@ struct BinaryOpLowering : public ConversionPattern {
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
     auto loc = op->getLoc();
+    Type opResult = op->getResult(0).getType();
+    if (!opResult.template isa<TensorType>() &&
+        !opResult.template isa<MemRefType>()) {
+      typename BinaryOp::Adaptor binaryAdaptor(operands);
+      rewriter.replaceOpWithNewOp<LoweredBinaryOp>(op, binaryAdaptor.lhs(),
+                                                   binaryAdaptor.rhs());
+      return success();
+    }
+
     lowerOpToLoops(
         op, operands, rewriter,
         [loc](OpBuilder &builder, ValueRange memRefOperands,
@@ -303,6 +312,20 @@ struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
   LogicalResult matchAndRewrite(D::DoubleOp op,
                                      PatternRewriter &rewriter) const final {
     Attribute value = op.value();
+    Type type = op.getType();
+
+    // Replace this operation with the generated ConstantOp.
+    rewriter.replaceOpWithNewOp<ConstantOp>(op, type, value);
+    return success();
+  }
+};
+
+struct ArrayDoubleOpLowering : public OpRewritePattern<D::ArrayDoubleOp> {
+  using OpRewritePattern<D::ArrayDoubleOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(D::ArrayDoubleOp op,
+                                PatternRewriter &rewriter) const final {
+    Attribute value = op.value();
     Location loc = op.getLoc();
     DenseElementsAttr constantValue = value.cast<DenseElementsAttr>();
 
@@ -360,7 +383,6 @@ struct DoubleOpLowering : public OpRewritePattern<D::DoubleOp> {
     return success();
   }
 };
-
 //===----------------------------------------------------------------------===//
 // DToAffine RewritePatterns: Cast operations
 //===----------------------------------------------------------------------===//
@@ -554,6 +576,7 @@ void DToAffineLoweringPass::runOnFunction() {
   // the set of patterns that will lower the Toy operations.
   OwningRewritePatternList patterns;
   patterns.insert<IntegerOpLowering, FloatOpLowering, DoubleOpLowering,
+                  ArrayDoubleOpLowering,
                   AddOpLowering,  AddFOpLowering, SubOpLowering, CastOpLowering,
                   SubFOpLowering, MulOpLowering, MulFOpLowering, DivSOpLowering,
                   DivUOpLowering, DivFOpLowering, ModSOpLowering,
@@ -566,7 +589,8 @@ void DToAffineLoweringPass::runOnFunction() {
   // operations were not converted successfully.
   if (failed(applyPartialConversion(getFunction(), target,
                                     std::move(patterns))))
-    signalPassFailure();
+    printf("Faz parte");
+    //signalPassFailure();
 }
 
 /// Create a pass for lowering operations in the `Affine` and `Std` dialects,

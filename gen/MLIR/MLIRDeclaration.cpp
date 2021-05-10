@@ -509,7 +509,7 @@ mlir::Value MLIRDeclaration::mlirGen(ArrayLiteralExp *arrayLiteralExp) {
   if (isFloat == 64) {
     collectFloatData(dataF, arrayLiteralExp, isFloat == 64);
     auto dataAttributes = mlir::DenseElementsAttr::get(tensorType, dataF);
-    return builder.create<mlir::D::DoubleOp>(Loc, tensorType, dataAttributes);
+    return builder.create<mlir::D::ArrayDoubleOp>(Loc, tensorType, dataAttributes);
   } else if (isFloat) {
     collectFloatData(dataF, arrayLiteralExp, isFloat == 64);
     auto dataAttributes = mlir::DenseElementsAttr::get(tensorType, dataF);
@@ -922,10 +922,11 @@ mlir::Value MLIRDeclaration::mlirGen(Expression *expression, int func) {
     int rank = tensorType.getRank();
     int dim = tensorType.getDimSize(0);
 
-    if (rank == 1 && dim == 1) {
+    /*if (rank == 1 && dim == 1) {
       e1 = builder.create<mlir::ConstantOp>(location, e1.getDefiningOp()->getAttr("value").cast<mlir::DenseElementsAttr>().getValue(0));
       e2 = builder.create<mlir::ConstantOp>(location, e2.getDefiningOp()->getAttr("value").cast<mlir::DenseElementsAttr>().getValue(0));
-    }
+    }*/
+    type1 = tensorType.getElementType();
   }
   bool isFloat = isReal(type1);
 
@@ -1276,11 +1277,12 @@ mlir::Value MLIRDeclaration::mlirGen(PostExp *postExp) {
     type1 = type1.cast<mlir::TensorType>().getElementType();
   }
   auto shapedType = mlir::RankedTensorType::get(1, type1);
-  auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, 1);
+  auto dataAttribute = mlir::DenseElementsAttr::get(shapedType, 1.0);
   if (type1.isF32() || type1.isF16())
     e2 = builder.create<mlir::D::FloatOp>(location, shapedType, dataAttribute);
   else if (type1.isF64())
-    e2 = builder.create<mlir::D::DoubleOp>(location, shapedType, dataAttribute);
+  //  e2 = builder.create<mlir::D::DoubleOp>(location, shapedType,dataAttribute);
+    e2 = builder.create<mlir::D::DoubleOp>(location, type1, 1.0);
   else
     e2 = builder.create<mlir::D::IntegerOp>(location, shapedType, dataAttribute);
 

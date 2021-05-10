@@ -99,7 +99,8 @@ public:
         miss++;
       }
     }
-
+    //theModule.getRegion().viewGraph();
+    // theModule.dump();
     // this won't do much, but it should at least check some structural
     // properties of the generated MLIR module.
     if (failed(mlir::verify(theModule))) {
